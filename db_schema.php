@@ -108,6 +108,7 @@ $tables = array(
         id INT PRIMARY KEY AUTO_INCREMENT,
         reported_by INT,
         camp_id INT,
+        report_category ENUM('activity', 'issue') DEFAULT 'issue',
         issue_type VARCHAR(100),
         priority ENUM('low', 'medium', 'high', 'critical') DEFAULT 'high',
         location VARCHAR(255),
@@ -160,7 +161,6 @@ $tables = array(
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (camp_id) REFERENCES camps(id)
     )",
-    // Inventory Table
     "CREATE TABLE IF NOT EXISTS inventory (
         id INT PRIMARY KEY AUTO_INCREMENT,
         camp_id INT,
@@ -171,6 +171,17 @@ $tables = array(
         status ENUM('In Stock', 'Limited', 'Out of Stock') DEFAULT 'In Stock',
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (camp_id) REFERENCES camps(id)
+    )",
+    // Schedules Table
+    "CREATE TABLE IF NOT EXISTS schedules (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        user_id INT,
+        day_of_week ENUM('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday') NOT NULL,
+        start_time TIME NOT NULL,
+        end_time TIME NOT NULL,
+        location VARCHAR(255),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id)
     )"
 );
 
@@ -205,11 +216,17 @@ $sampleData = array(
 
     // Sample tasks
     "INSERT IGNORE INTO tasks (id, task_name, description, camp_id, assigned_to, assigned_by, priority, status, due_date) VALUES
-    (1, 'Food Distribution - Section A', 'Distribute food packets to 25 families in Section A', 1, 3, 2, 'high', 'pending', '2026-05-01 15:00:00'),
-    (2, 'Medicine Delivery', 'Deliver medical supplies to elderly residents', 1, 3, 2, 'high', 'in_progress', '2026-05-01 17:00:00'),
-    (3, 'Water Supply Check', 'Ensure water supply is adequate in all sections', 1, 3, 2, 'medium', 'completed', '2026-05-01 12:00:00'),
-    (4, 'Blanket Distribution', 'Distribute blankets to 15 families', 1, 3, 2, 'low', 'pending', '2026-05-02 14:00:00'),
-    (5, 'Registration Assistance', 'Help new families with registration process', 1, 3, 2, 'medium', 'in_progress', '2026-05-02 10:00:00')"
+    (1, 'Food Distribution - Section A', 'Distribute food packets to 25 families in Section A', 1, 3, 2, 'high', 'pending', '2026-05-04 15:00:00'),
+    (2, 'Medicine Delivery', 'Deliver medical supplies to elderly residents', 1, 3, 2, 'high', 'in_progress', '2026-05-04 17:00:00'),
+    (3, 'Water Supply Check', 'Ensure water supply is adequate in all sections', 1, 3, 2, 'medium', 'completed', '2026-05-04 12:00:00'),
+    (4, 'Blanket Distribution', 'Distribute blankets to 15 families', 1, 3, 2, 'low', 'pending', '2026-05-04 14:00:00'),
+    (5, 'Registration Assistance', 'Help new families with registration process', 1, 3, 2, 'medium', 'in_progress', '2026-05-02 10:00:00')",
+    
+    // Sample schedules
+    "INSERT IGNORE INTO schedules (id, user_id, day_of_week, start_time, end_time, location) VALUES
+    (1, 3, 'Monday', '09:00:00', '17:00:00', 'Central Relief Camp'),
+    (2, 3, 'Wednesday', '13:00:00', '21:00:00', 'Central Relief Camp'),
+    (3, 3, 'Friday', '09:00:00', '17:00:00', 'North Emergency Shelter')"
 );
 
 // Insert sample data
