@@ -19,6 +19,29 @@ $user_id = $_SESSION['user_id'];
 $user_query = $conn->query("SELECT * FROM users WHERE id = $user_id");
 $user = $user_query->fetch_assoc();
 
+// Database Migration: Ensure columns exist in inventory
+$cols = $conn->query("SHOW COLUMNS FROM inventory");
+$existing_cols = [];
+while($row = $cols->fetch_assoc()) { $existing_cols[] = $row['Field']; }
+
+if (!in_array('min_threshold', $existing_cols)) {
+    $conn->query("ALTER TABLE inventory ADD COLUMN min_threshold FLOAT DEFAULT 50.0 AFTER quantity");
+}
+if (!in_array('updated_at', $existing_cols)) {
+    $conn->query("ALTER TABLE inventory ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at");
+}
+if (!in_array('unit', $existing_cols)) {
+    $conn->query("ALTER TABLE inventory ADD COLUMN unit VARCHAR(50) DEFAULT 'units' AFTER quantity");
+}
+
+// User Table Migration
+$u_cols = $conn->query("SHOW COLUMNS FROM users");
+$existing_u_cols = [];
+while($row = $u_cols->fetch_assoc()) { $existing_u_cols[] = $row['Field']; }
+if (!in_array('phone', $existing_u_cols)) { $conn->query("ALTER TABLE users ADD COLUMN phone VARCHAR(20) AFTER email"); }
+if (!in_array('skills', $existing_u_cols)) { $conn->query("ALTER TABLE users ADD COLUMN skills TEXT AFTER phone"); }
+if (!in_array('availability', $existing_u_cols)) { $conn->query("ALTER TABLE users ADD COLUMN availability VARCHAR(100) AFTER skills"); }
+
 // Fetch the camp managed by this user
 $camp_res = $conn->query("SELECT * FROM camps WHERE manager_id = $user_id LIMIT 1");
 $camp = $camp_res->fetch_assoc();
@@ -52,12 +75,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             $insert = $conn->query("INSERT INTO families (head_name, family_members, village, needs, camp_id) VALUES ('$head', $members, '$village', '$needs', $camp_id)");
             if ($insert) {
-                // Update camp occupancy
                 $conn->query("UPDATE camps SET current_occupancy = current_occupancy + $members WHERE id = $camp_id");
                 $success_msg = "Family registered successfully.";
-            } else {
-                $error_msg = "Failed to register family.";
-            }
+            } else { $error_msg = "Failed to register family."; }
         }
         
         if ($action === 'assign_task') {
@@ -66,24 +86,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $priority = sanitize($_POST['priority']);
             
             $insert = $conn->query("INSERT INTO tasks (task_name, camp_id, assigned_to, assigned_by, priority, status) VALUES ('$task_name', $camp_id, $vol_id, $user_id, '$priority', 'pending')");
-            if ($insert) {
-                $success_msg = "Task assigned successfully.";
-            } else {
-                $error_msg = "Failed to assign task.";
-            }
+            if ($insert) { $success_msg = "Task assigned successfully."; } 
+            else { $error_msg = "Failed to assign task."; }
         }
 
-        if ($action === 'update_inventory') {
+        if ($action === 'update_inventory_detailed') {
             $item_id = intval($_POST['item_id']);
             $new_qty = floatval($_POST['quantity']);
-            $status = ($new_qty > 100) ? 'In Stock' : (($new_qty > 0) ? 'Limited' : 'Out of Stock');
-            
-            $update = $conn->query("UPDATE inventory SET quantity = $new_qty, status = '$status' WHERE id = $item_id AND camp_id = $camp_id");
-            if ($update) {
-                $success_msg = "Inventory updated successfully.";
-            } else {
-                $error_msg = "Failed to update inventory.";
-            }
+            $new_threshold = floatval($_POST['min_threshold']);
+            $status = ($new_qty > $new_threshold) ? 'In Stock' : (($new_qty > 0) ? 'Limited' : 'Out of Stock');
+            $update = $conn->query("UPDATE inventory SET quantity = $new_qty, min_threshold = $new_threshold, status = '$status', updated_at = NOW() WHERE id = $item_id AND camp_id = $camp_id");
+            if ($update) { $success_msg = "Inventory updated successfully."; } 
+            else { $error_msg = "Failed to update inventory."; }
         }
 
         if ($action === 'add_inventory') {
@@ -92,528 +106,653 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $qty = floatval($_POST['quantity']);
             $unit = sanitize($_POST['unit']);
             $status = ($qty > 100) ? 'In Stock' : (($qty > 0) ? 'Limited' : 'Out of Stock');
-            
             $insert = $conn->query("INSERT INTO inventory (camp_id, item_name, category, quantity, unit, status) VALUES ($camp_id, '$name', '$cat', $qty, '$unit', '$status')");
-            if ($insert) {
-                $success_msg = "Item added to inventory.";
-            } else {
-                $error_msg = "Failed to add item.";
-            }
+            if ($insert) { $success_msg = "Item added to inventory."; } 
+            else { $error_msg = "Failed to add item."; }
         }
 
-        if ($action === 'assign_volunteer_to_camp') {
-            $vol_id = intval($_POST['volunteer_id']);
-            // Check if already assigned
-            $check = $conn->query("SELECT id FROM volunteer_assignments WHERE volunteer_id = $vol_id AND camp_id = $camp_id AND status = 'active'");
-            if ($check && $check->num_rows > 0) {
-                $error_msg = "Volunteer is already assigned to this camp.";
-            } else {
-                $insert = $conn->query("INSERT INTO volunteer_assignments (volunteer_id, camp_id, status, assignment_date) VALUES ($vol_id, $camp_id, 'active', CURRENT_TIMESTAMP)");
-                if ($insert) {
-                    $success_msg = "Volunteer assigned to camp successfully.";
-                } else {
-                    $error_msg = "Failed to assign volunteer.";
-                }
-            }
+        if ($action === 'add_volunteer') {
+            $name = sanitize($_POST['full_name']);
+            $email = sanitize($_POST['email']);
+            $phone = sanitize($_POST['phone']);
+            $skills = sanitize($_POST['skills']);
+            $avail = sanitize($_POST['availability']);
+            $pwd = password_hash('volunteer123', PASSWORD_DEFAULT);
+
+            $insert_user = $conn->query("INSERT INTO users (full_name, email, password, phone, skills, availability, role) VALUES ('$name', '$email', '$pwd', '$phone', '$skills', '$avail', 'volunteer')");
+            if ($insert_user) {
+                $v_id = $conn->insert_id;
+                $conn->query("INSERT INTO volunteer_assignments (volunteer_id, camp_id, status) VALUES ($v_id, $camp_id, 'active')");
+                $success_msg = "Volunteer added and assigned to camp.";
+            } else { $error_msg = "Failed to add volunteer: " . $conn->error; }
         }
     }
 }
 
 $page = isset($_GET['page']) ? $_GET['page'] : 'dashboard';
 
-$unread_query = $conn->query("SELECT COUNT(*) AS count FROM notifications WHERE user_id = $user_id AND is_read = 0");
-$unread = $unread_query ? $unread_query->fetch_assoc() : ['count' => 0];
-$unread_count = $unread['count'];
-
-// Real Stats
+// Fetch Global Data
 $stats = [
-    ['label' => 'Current Occupancy', 'value' => ($camp['current_occupancy'] ?? 0) . ' of ' . ($camp['capacity'] ?? 500), 'meta' => 'Total capacity', 'icon' => '👥', 'color' => '#3b82f6'],
-    ['label' => 'Supply Items', 'value' => $conn->query("SELECT COUNT(*) FROM inventory WHERE camp_id = $camp_id")->fetch_row()[0], 'meta' => 'Total items', 'icon' => '📦', 'color' => '#10b981'],
-    ['label' => 'Active Tasks', 'value' => $conn->query("SELECT COUNT(*) FROM tasks WHERE camp_id = $camp_id AND status = 'pending'")->fetch_row()[0], 'meta' => 'Pending', 'icon' => '📋', 'color' => '#f97316'],
-    ['label' => 'Distributions', 'value' => $conn->query("SELECT COUNT(*) FROM distributions WHERE camp_id = $camp_id")->fetch_row()[0], 'meta' => 'Recent', 'icon' => '📈', 'color' => '#8b5cf6'],
+    ['label' => 'Current Occupancy', 'value' => ($camp['current_occupancy'] ?? 0), 'meta' => 'of ' . ($camp['capacity'] ?? 500), 'icon' => 'users', 'color' => '#6366f1'],
+    ['label' => 'Supply Items', 'value' => $conn->query("SELECT COUNT(*) FROM inventory WHERE camp_id = $camp_id")->fetch_row()[0], 'meta' => 'Total items', 'icon' => 'package', 'color' => '#10b981'],
+    ['label' => 'Active Tasks', 'value' => $conn->query("SELECT COUNT(*) FROM tasks WHERE camp_id = $camp_id AND status = 'pending'")->fetch_row()[0], 'meta' => 'Pending', 'icon' => 'clipboard-list', 'color' => '#f97316'],
+    ['label' => 'Distributions', 'value' => $conn->query("SELECT COUNT(*) FROM distributions WHERE camp_id = $camp_id")->fetch_row()[0], 'meta' => 'Recent', 'icon' => 'trending-up', 'color' => '#8b5cf6'],
 ];
 
-// Fetch Recent Distributions
-$recent_distributions_res = $conn->query("SELECT * FROM distributions WHERE camp_id = $camp_id ORDER BY distributed_at DESC LIMIT 3");
-$recent_distributions = [];
-if ($recent_distributions_res) {
-    while($row = $recent_distributions_res->fetch_assoc()) { $recent_distributions[] = $row; }
-}
+$unread_query = $conn->query("SELECT COUNT(*) AS count FROM notifications WHERE user_id = $user_id AND is_read = 0");
+$unread_count = $unread_query ? $unread_query->fetch_assoc()['count'] : 0;
 
-// If no distributions yet, add some samples for the UI look
-if (empty($recent_distributions)) {
-    $conn->query("INSERT IGNORE INTO distributions (camp_id, recipient_name, items, distributed_at) VALUES 
-        ($camp_id, 'Robert Martinez', 'Food packets, Water', '2026-03-29 10:00:00'),
-        ($camp_id, 'Maria Garcia', 'Clothing, Blankets', '2026-03-29 14:00:00'),
-        ($camp_id, 'Robert Martinez', 'Medical supplies', '2026-03-28 09:00:00')");
-    $recent_distributions_res = $conn->query("SELECT * FROM distributions WHERE camp_id = $camp_id ORDER BY distributed_at DESC LIMIT 3");
-    while($row = $recent_distributions_res->fetch_assoc()) { $recent_distributions[] = $row; }
-}
-
-// Fetch Top Inventory for Chart
+// Fetch Recent Data for Dashboard
 $chart_inventory_res = $conn->query("SELECT item_name, quantity FROM inventory WHERE camp_id = $camp_id ORDER BY quantity DESC LIMIT 5");
-$chart_data = [];
-while($row = $chart_inventory_res->fetch_assoc()) { $chart_data[] = $row; }
+$chart_data = []; while($row = $chart_inventory_res->fetch_assoc()) { $chart_data[] = $row; }
 
-// Fetch Families
+$recent_dist_res = $conn->query("SELECT * FROM distributions WHERE camp_id = $camp_id ORDER BY distributed_at DESC LIMIT 5");
+$recent_distributions = []; while($row = $recent_dist_res->fetch_assoc()) { $recent_distributions[] = $row; }
+
 $families_res = $conn->query("SELECT * FROM families WHERE camp_id = $camp_id ORDER BY created_at DESC");
-$families = [];
-while($row = $families_res->fetch_assoc()) {
-    $families[] = $row;
-}
+$families = []; while($row = $families_res->fetch_assoc()) { $families[] = $row; }
 
-// Fetch Inventory
 $inventory_res = $conn->query("SELECT * FROM inventory WHERE camp_id = $camp_id ORDER BY item_name ASC");
-$inventory = [];
-if ($inventory_res && $inventory_res->num_rows > 0) {
-    while($row = $inventory_res->fetch_assoc()) { $inventory[] = $row; }
-} else {
-    // Ensure 'unit' column exists (fix for schema mismatch)
-    try {
-        $conn->query("ALTER TABLE inventory ADD COLUMN unit VARCHAR(50) AFTER quantity");
-    } catch (Exception $e) {
-        // Column probably already exists
-    }
-    
-    // Insert some defaults if empty for this demo
-    $conn->query("INSERT INTO inventory (camp_id, item_name, category, quantity, unit, status) VALUES 
-        ($camp_id, 'Rice', 'Food', 500, 'kg', 'In Stock'),
-        ($camp_id, 'Medicine Kit', 'Medical', 45, 'units', 'Limited'),
-        ($camp_id, 'Water Bottles', 'Supplies', 240, 'pcs', 'In Stock'),
-        ($camp_id, 'Warm Clothes', 'Clothing', 150, 'sets', 'In Stock'),
-        ($camp_id, 'Blankets', 'Supplies', 120, 'pcs', 'In Stock'),
-        ($camp_id, 'Packaged Food', 'Food', 300, 'units', 'In Stock'),
-        ($camp_id, 'Canned Food', 'Food', 200, 'cans', 'In Stock'),
-        ($camp_id, 'Sanitary Items', 'Hygiene', 180, 'kits', 'In Stock')");
-    $inventory_res = $conn->query("SELECT * FROM inventory WHERE camp_id = $camp_id ORDER BY item_name ASC");
-    while($row = $inventory_res->fetch_assoc()) { $inventory[] = $row; }
-}
+$inventory = []; while($row = $inventory_res->fetch_assoc()) { $inventory[] = $row; }
 
-// Fetch Volunteers for task assignment
-$volunteers_res = $conn->query("SELECT id, full_name FROM users WHERE role = 'volunteer' AND status = 'active'");
-$volunteers = [];
-while($row = $volunteers_res->fetch_assoc()) {
-    $volunteers[] = $row;
-}
+$volunteers_res = $conn->query("SELECT u.* FROM users u JOIN volunteer_assignments va ON u.id = va.volunteer_id WHERE va.camp_id = $camp_id AND va.status = 'active'");
+$volunteers = []; while($row = $volunteers_res->fetch_assoc()) { $volunteers[] = $row; }
+
+$tasks_res = $conn->query("SELECT t.*, u.full_name as assigned_name FROM tasks t LEFT JOIN users u ON t.assigned_to = u.id WHERE t.camp_id = $camp_id ORDER BY t.created_at DESC");
+$tasks = []; while($row = $tasks_res->fetch_assoc()) { $tasks[] = $row; }
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Camp Manager Dashboard - DisasterRelief</title>
+    <title>Camp Manager Dashboard - Relief System</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
+        :root { --primary: #4f46e5; --primary-light: #eef2ff; --secondary: #64748b; --success: #10b981; --warning: #f59e0b; --danger: #ef4444; --background: #f8fafc; --sidebar-bg: #ffffff; --card-bg: #ffffff; --text-main: #1e293b; --text-muted: #64748b; --border: #e2e8f0; --radius-lg: 16px; --radius-md: 12px; --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05); --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; background: #f3f4f6; color: #111827; }
+        body { font-family: 'Inter', sans-serif; background: var(--background); color: var(--text-main); line-height: 1.5; }
         .layout { display: flex; min-height: 100vh; }
-        .sidebar { width: 240px; background: #ffffff; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column; }
-        .sidebar-top { display: flex; flex-direction: column; align-items: flex-start; padding: 1.75rem 1.5rem 1rem; }
-        .logo { width: 36px; height: 36px; border-radius: 8px; background: #2563eb; color: white; display: grid; place-items: center; font-weight: 800; margin-bottom: 0.5rem; }
-        .brand { font-weight: 800; font-size: 1.2rem; color: #1e293b; letter-spacing: -0.02em; }
-        .role-tag { font-size: 0.75rem; color: #64748b; font-weight: 600; margin-top: -0.25rem; }
-        .menu { list-style: none; padding: 1rem 0.75rem; margin: 0; }
-        .menu-item { margin-bottom: 0.25rem; }
-        .menu-link { display: flex; align-items: center; gap: 0.85rem; padding: 0.75rem 1rem; color: #64748b; text-decoration: none; border-radius: 10px; transition: all 0.2s; font-weight: 500; font-size: 0.9rem; }
-        .menu-link:hover, .menu-link.active { background: #f1f5f9; color: #2563eb; }
-        .menu-link.active { background: #eff6ff; color: #2563eb; font-weight: 600; }
-        .menu-icon { font-size: 1.1rem; width: 24px; text-align: center; }
-        .menu-badge { margin-left: auto; background: #f97316; color: white; border-radius: 999px; font-size: 0.75rem; padding: 0.1rem 0.5rem; }
-        .sidebar-footer { margin-top: auto; padding: 1.5rem; font-size: 0.85rem; color: #94a3b8; border-top: 1px solid #f1f5f9; }
-        .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-        .topbar { background: white; padding: 1.5rem 2.5rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; }
-        .topbar-left { display: flex; flex-direction: column; gap: 0.15rem; }
-        .topbar-title { font-size: 1.5rem; font-weight: 800; color: #1e293b; letter-spacing: -0.02em; }
-        .topbar-subtitle { color: #64748b; font-size: 0.9rem; font-weight: 500; }
-        .topbar-actions { display: flex; gap: 1rem; align-items: center; }
-        .content { padding: 2rem 2.5rem; overflow-y: auto; background: #f8fafc; }
-        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; margin-bottom: 2rem; }
-        .stat-card { background: white; border-radius: 16px; padding: 1.5rem; border: 1px solid #f1f5f9; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; transition: transform 0.2s; }
-        .stat-card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.05); }
-        .stat-text { display: flex; flex-direction: column; }
-        .stat-label { color: #64748b; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem; }
-        .stat-value { font-size: 1.75rem; font-weight: 800; color: #1e293b; line-height: 1.1; margin-bottom: 0.25rem; }
-        .stat-meta { color: #94a3b8; font-size: 0.8rem; font-weight: 500; }
-        .stat-icon { width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; font-size: 1.25rem; }
-        .dashboard-main-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
-        .panel { background: white; border-radius: 16px; padding: 1.75rem; border: 1px solid #f1f5f9; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-        .panel-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
-        .panel-heading h3 { font-size: 1.1rem; font-weight: 700; color: #1e293b; }
         
-        /* Bar Chart Styles */
-        .chart-container { height: 260px; display: flex; align-items: flex-end; justify-content: space-between; padding: 1rem 0; gap: 1.5rem; }
-        .chart-bar-wrapper { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; gap: 0.75rem; }
-        .chart-bar-bg { width: 100%; flex: 1; background: #f8fafc; border-radius: 4px; display: flex; align-items: flex-end; overflow: hidden; position: relative; }
-        .chart-bar-bg::before { content: ''; position: absolute; left: 0; right: 0; border-top: 1px dashed #e2e8f0; }
-        .chart-bar-bg::after { content: ''; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px dashed #e2e8f0; }
-        .chart-bar { width: 100%; background: #4f46e5; border-radius: 4px; transition: height 1s ease-out; position: relative; z-index: 1; min-height: 5px; }
-        .chart-label { font-size: 0.75rem; color: #64748b; font-weight: 600; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; }
-        .chart-value { font-size: 0.75rem; font-weight: 700; color: #1e293b; margin-top: 2px; }
+        /* Sidebar */
+        .sidebar { width: 260px; background: var(--sidebar-bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; z-index: 20; }
+        .sidebar-header { padding: 2rem 1.5rem; }
+        .brand-name { font-size: 1.25rem; font-weight: 800; color: #0f172a; letter-spacing: -0.025em; }
+        .brand-sub { font-size: 0.85rem; font-weight: 500; color: var(--text-muted); }
+        .menu { list-style: none; padding: 0 0.75rem; flex: 1; }
+        .menu-link { display: flex; align-items: center; gap: 12px; padding: 10px 16px; color: var(--text-muted); text-decoration: none; border-radius: var(--radius-md); transition: 0.2s; font-weight: 500; font-size: 0.925rem; margin-bottom: 4px; }
+        .menu-link:hover, .menu-link.active { background: var(--primary-light); color: var(--primary); }
+        .menu-link.active { font-weight: 600; }
+        .menu-badge { margin-left: auto; background: var(--danger); color: white; border-radius: 999px; font-size: 0.7rem; padding: 2px 8px; font-weight: 700; }
+        .sidebar-footer { padding: 1.5rem; border-top: 1px solid var(--border); }
+        
+        /* Main */
+        .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+        .header { background: white; padding: 1.25rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
+        .header-title { font-size: 1.5rem; font-weight: 700; color: #0f172a; }
+        .header-subtitle { font-size: 0.9rem; color: var(--text-muted); font-weight: 500; }
+        .content { padding: 2rem; max-width: 1400px; margin: 0 auto; width: 100%; }
+        
+        /* Components */
+        .panel { background: white; border-radius: var(--radius-lg); border: 1px solid var(--border); overflow: hidden; margin-bottom: 1.5rem; box-shadow: var(--shadow-sm); }
+        .panel-header { padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .panel-title { font-size: 1.1rem; font-weight: 700; color: #0f172a; }
+        .panel-content { padding: 1.5rem; }
+        .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 10px; font-size: 0.875rem; font-weight: 600; cursor: pointer; transition: 0.2s; border: 1px solid transparent; text-decoration: none; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-outline { background: white; border-color: var(--border); color: var(--text-main); }
+        .btn-sm { padding: 6px 12px; font-size: 0.75rem; }
+        
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+        .stat-card { background: white; border-radius: var(--radius-lg); padding: 1.5rem; border: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .stat-icon-box { width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; }
+        
+        /* Table & Form */
+        .table-container { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        th { padding: 1rem; background: #f8fafc; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+        td { padding: 1rem; border-bottom: 1px solid #f1f5f9; font-size: 0.9rem; }
+        .badge { padding: 4px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+        .form-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 1rem; }
+        .form-control { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border); font-family: inherit; font-size: 0.9rem; background: #f8fafc; }
+        
+        /* Chart */
+        .chart-container { height: 260px; position: relative; padding-top: 20px; }
+        .chart-grid { position: absolute; top: 20px; left: 40px; right: 0; bottom: 40px; display: flex; flex-direction: column; justify-content: space-between; }
+        .chart-grid-line { width: 100%; border-top: 1px dashed #e2e8f0; position: relative; }
+        .chart-grid-line::before { content: attr(data-value); position: absolute; left: -40px; top: -10px; font-size: 0.75rem; color: #94a3b8; font-weight: 600; }
+        .chart-bars-area { position: absolute; top: 20px; left: 40px; right: 0; bottom: 40px; display: flex; align-items: flex-end; justify-content: space-around; }
+        .chart-bar { width: 36px; background: var(--primary); border-radius: 6px 6px 0 0; position: relative; }
+        .chart-bar-labels { position: absolute; left: 40px; right: 0; bottom: 10px; display: flex; justify-content: space-around; }
+        .chart-bar-label { flex: 1; text-align: center; font-size: 0.75rem; font-weight: 600; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 5px; }
 
-        /* Distribution List Styles */
-        .dist-list { display: flex; flex-direction: column; gap: 1rem; }
-        .dist-item { padding: 1rem; border-radius: 12px; background: #f8fafc; display: flex; justify-content: space-between; align-items: center; transition: all 0.2s; }
-        .dist-item:hover { background: #f1f5f9; }
-        .dist-info { display: flex; flex-direction: column; gap: 0.2rem; }
-        .dist-name { font-weight: 700; color: #1e293b; font-size: 0.95rem; }
-        .dist-details { font-size: 0.8rem; color: #64748b; }
-        .dist-date { font-size: 0.75rem; color: #94a3b8; font-weight: 600; }
-        .table { width: 100%; border-collapse: collapse; background: white; border-radius: 24px; overflow: hidden; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05); }
-        .table thead { background: #f8fafc; }
-        .table th, .table td { padding: 1rem 1.1rem; text-align: left; color: #374151; font-size: 0.95rem; }
-        .table tbody tr { border-bottom: 1px solid #e5e7eb; }
-        .table tbody tr:last-child { border-bottom: none; }
-        .badge { display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; padding: 0.35rem 0.75rem; font-size: 0.78rem; font-weight: 700; }
-        .status-chip { border-radius: 999px; padding: 0.45rem 0.75rem; font-size: 0.78rem; font-weight: 700; }
-        .status-instock { background: #ecfdf5; color: #166534; }
-        .status-limited { background: #fffbeb; color: #92400e; }
-        .status-pending { background: #fff7ed; color: #9a3412; }
-        .status-inprogress { background: #eff6ff; color: #1e40af; }
-        .status-completed { background: #f0fdf4; color: #166534; }
-        .status-cancelled { background: #fef2f2; color: #991b1b; }
-        .vol-card { border: 1px solid #e5e7eb; border-radius: 16px; padding: 1.25rem; margin-bottom: 1.5rem; }
-        .vol-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
-        .vol-info { display: flex; align-items: center; gap: 1rem; }
-        .vol-avatar { width: 40px; height: 40px; border-radius: 10px; background: #2563eb; color: white; display: grid; place-items: center; font-weight: 700; }
-        .form-field { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; }
-        .form-field label { font-size: 0.9rem; color: #374151; font-weight: 600; }
-        .form-field input, .form-field textarea, .form-field select { width: 100%; border: 1px solid #d1d5db; border-radius: 14px; padding: 0.95rem 1rem; font-size: 0.95rem; background: #f8fafc; }
-        .form-field textarea { min-height: 120px; resize: vertical; }
-        .profile-dropdown { position: absolute; top: 100%; right: 0; margin-top: 0.75rem; width: 220px; background: white; border-radius: 16px; border: 1px solid #e5e7eb; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); display: none; z-index: 100; overflow: hidden; }
-        .profile-dropdown.show { display: block; animation: dropdownSlide 0.2s ease-out; }
-        .dropdown-header { padding: 1.25rem; border-bottom: 1px solid #f3f4f6; background: #f9fafb; text-align: left; }
-        .dropdown-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.85rem 1.25rem; color: #374151; text-decoration: none; font-size: 0.9rem; font-weight: 500; transition: all 0.2s; }
-        .dropdown-item:hover { background: #eff6ff; color: #2563eb; }
-        .dropdown-item.logout { color: #ef4444; }
-        .dropdown-item.logout:hover { background: #fef2f2; color: #ef4444; }
-        @keyframes dropdownSlide { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        /* Overview Specific Styles */
+        .overview-grid { display: grid; grid-template-columns: 1fr 320px; gap: 1.5rem; }
+        .camp-layout { background: #f1f5f9; border-radius: 12px; height: 400px; display: flex; align-items: center; justify-content: center; position: relative; border: 2px dashed #cbd5e1; }
+        .camp-zone { position: absolute; background: white; border: 1px solid var(--border); border-radius: 8px; padding: 10px; box-shadow: var(--shadow-sm); transition: 0.2s; cursor: pointer; }
+        .camp-zone:hover { transform: scale(1.05); box-shadow: var(--shadow-md); border-color: var(--primary); }
+        .zone-label { font-size: 0.7rem; font-weight: 700; color: var(--text-muted); }
+        .zone-value { font-size: 0.9rem; font-weight: 800; color: var(--text-main); }
+        
+        .resource-card { display: flex; align-items: center; gap: 12px; padding: 12px; background: white; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 12px; }
+        .resource-icon { width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; margin-left: auto; }
+        .dot-success { background: var(--success); box-shadow: 0 0 8px var(--success); }
+        .dot-warning { background: var(--warning); box-shadow: 0 0 8px var(--warning); }
+        .dot-danger { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
 
-        @media (max-width: 1080px) { .stats-grid, .dashboard-grid { grid-template-columns: 1fr; } .sidebar { width: 100%; } .topbar { flex-wrap: wrap; gap: 1rem; } }
-        @media (max-width: 760px) { .layout { flex-direction: column; } .sidebar { order: 2; } .topbar, .content { padding: 1.25rem; } }
+        /* Exact Overview Styles */
+        .ov-info-grid { display: grid; grid-template-columns: 1fr 340px; gap: 1.5rem; margin-bottom: 1.5rem; }
+        .ov-card { background: white; border-radius: var(--radius-lg); border: 1px solid var(--border); padding: 1.5rem; }
+        .ov-info-item { display: flex; align-items: flex-start; gap: 1rem; margin-bottom: 1.5rem; }
+        .ov-info-icon { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: #f1f5f9; color: var(--primary); }
+        .ov-progress-container { margin-top: 2rem; }
+        .ov-progress-bar { height: 10px; background: #e2e8f0; border-radius: 5px; overflow: hidden; margin-bottom: 8px; }
+        .ov-progress-fill { height: 100%; background: #0f172a; border-radius: 5px; }
+        
+        .quick-stat-card { border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem; text-align: center; border: 1px solid transparent; }
+        .qs-blue { background: #eff6ff; border-color: #dbeafe; color: #1e40af; }
+        .qs-green { background: #f0fdf4; border-color: #dcfce7; color: #166534; }
+        .qs-purple { background: #faf5ff; border-color: #f3e8ff; color: #6b21a8; }
+        .qs-value { font-size: 1.5rem; font-weight: 800; }
+        .qs-label { font-size: 0.75rem; font-weight: 600; opacity: 0.8; }
+
+        .facilities-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+        .facility-item { background: white; border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem; text-align: center; }
+        .facility-name { font-weight: 700; font-size: 0.85rem; color: #1e293b; margin-bottom: 4px; }
+        .facility-status { font-size: 0.7rem; font-weight: 700; color: var(--success); }
+
+        /* Affected People Styles */
+        .ap-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; margin-bottom: 2rem; }
+        .ap-stat-card { background: white; border-radius: var(--radius-lg); border: 1px solid var(--border); padding: 1.5rem; text-align: center; }
+        .ap-stat-label { font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 8px; }
+        .ap-stat-value { font-size: 1.75rem; font-weight: 800; color: #0f172a; }
+        
+        .ap-table-panel { background: white; border-radius: var(--radius-lg); border: 1px solid var(--border); padding: 1.5rem; }
+        .ap-table-header { font-weight: 700; font-size: 1rem; margin-bottom: 1.5rem; color: #1e293b; }
+        .status-badge-assigned { background: #f0fdf4; color: #166534; border: 1px solid #dcfce7; }
+        
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+        .modal.show { display: flex; }
+        .modal-content { background: white; padding: 2rem; border-radius: var(--radius-lg); width: 100%; max-width: 500px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); }
+
+        /* Supplies Specific Styles */
+        .supplies-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
+        .supplies-stat-card { background: white; border-radius: 12px; border: 1px solid var(--border); padding: 1.25rem; text-align: center; }
+        .supplies-stat-icon { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; margin: 0 auto 10px; }
+        
+        .low-stock-row { background: #fff1f2 !important; }
+        .low-stock-text { color: #e11d48; font-weight: 700; }
+        .status-ok { color: #10b981; font-weight: 700; }
+        .status-low { color: #e11d48; font-weight: 700; }
+        
+        .category-badge { padding: 4px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+        .cat-food { background: #f0fdf4; color: #16a34a; }
+        .cat-medicine { background: #eff6ff; color: #2563eb; }
+        .cat-shelter { background: #faf5ff; color: #9333ea; }
+        .cat-other { background: #f8fafc; color: #64748b; }
+
+        /* Volunteer Styles */
+        .skill-badge { padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; font-weight: 600; background: #eff6ff; color: #2563eb; margin-right: 4px; display: inline-block; margin-bottom: 4px; }
+        .task-pill { background: #f0fdf4; color: #16a34a; padding: 4px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; border: 1px solid #dcfce7; }
+
+        @media (max-width: 1024px) { .sidebar { width: 80px; } .brand-container, .menu-link span, .menu-badge { display: none; } .menu-link { justify-content: center; } }
     </style>
 </head>
 <body>
     <div class="layout">
         <aside class="sidebar">
-            <div class="sidebar-top">
-                <div class="logo">DR</div>
-                <div class="brand">Relief System</div>
-                <div class="role-tag">Camp Manager</div>
+            <div class="sidebar-header">
+                <div class="brand-container"><span class="brand-name">Relief System</span><br><span class="brand-sub">Camp Manager</span></div>
             </div>
-            <ul class="menu">
-                <li class="menu-item"><a href="camp_manager_dashboard.php?page=dashboard" class="menu-link <?php echo $page === 'dashboard' ? 'active' : ''; ?>"><span class="menu-icon">📊</span>Dashboard</a></li>
-                <li class="menu-item"><a href="camp_manager_dashboard.php?page=overview" class="menu-link <?php echo $page === 'overview' ? 'active' : ''; ?>"><span class="menu-icon">📍</span>Camp Overview</a></li>
-                <li class="menu-item"><a href="camp_manager_dashboard.php?page=families" class="menu-link <?php echo $page === 'families' ? 'active' : ''; ?>"><span class="menu-icon">👨‍👩‍👧‍👦</span>Affected People</a></li>
-                <li class="menu-item"><a href="camp_manager_dashboard.php?page=inventory" class="menu-link <?php echo $page === 'inventory' ? 'active' : ''; ?>"><span class="menu-icon">📦</span>Supplies</a></li>
-                <li class="menu-item"><a href="camp_manager_dashboard.php?page=volunteers" class="menu-link <?php echo $page === 'volunteers' ? 'active' : ''; ?>"><span class="menu-icon">🧑‍🤝‍🧑</span>Volunteers</a></li>
-                <li class="menu-item"><a href="camp_manager_dashboard.php?page=tasks" class="menu-link <?php echo $page === 'tasks' ? 'active' : ''; ?>"><span class="menu-icon">📋</span>Tasks</a></li>
-                <li class="menu-item"><a href="camp_manager_dashboard.php?page=distribution" class="menu-link <?php echo $page === 'distribution' ? 'active' : ''; ?>"><span class="menu-icon">📈</span>Aid Distribution</a></li>
-                <li class="menu-item"><a href="camp_manager_dashboard.php?page=report" class="menu-link <?php echo $page === 'report' ? 'active' : ''; ?>"><span class="menu-icon">📄</span>Reports</a></li>
-                <li class="menu-item"><a href="camp_manager_dashboard.php?page=chat" class="menu-link <?php echo $page === 'chat' ? 'active' : ''; ?>"><span class="menu-icon">💬</span>Messages <?php if ($unread_count > 0): ?><span class="menu-badge"><?php echo $unread_count; ?></span><?php endif; ?></a></li>
-                <li class="menu-item"><a href="camp_manager_dashboard.php?page=settings" class="menu-link <?php echo $page === 'settings' ? 'active' : ''; ?>"><span class="menu-icon">⚙️</span>Settings</a></li>
-            </ul>
-            <div class="sidebar-footer">Camp Operations v2.4</div>
+            <nav class="menu">
+                <a href="?page=dashboard" class="menu-link <?php echo $page === 'dashboard' ? 'active' : ''; ?>"><i data-lucide="layout-dashboard"></i> <span>Dashboard</span></a>
+                <a href="?page=overview" class="menu-link <?php echo $page === 'overview' ? 'active' : ''; ?>"><i data-lucide="map-pin"></i> <span>Camp Overview</span></a>
+                <a href="?page=families" class="menu-link <?php echo $page === 'families' ? 'active' : ''; ?>"><i data-lucide="users"></i> <span>Affected People</span></a>
+                <a href="?page=inventory" class="menu-link <?php echo $page === 'inventory' ? 'active' : ''; ?>"><i data-lucide="package"></i> <span>Supplies</span></a>
+                <a href="?page=volunteers" class="menu-link <?php echo $page === 'volunteers' ? 'active' : ''; ?>"><i data-lucide="user-check"></i> <span>Volunteers</span></a>
+                <a href="?page=tasks" class="menu-link <?php echo $page === 'tasks' ? 'active' : ''; ?>"><i data-lucide="clipboard-list"></i> <span>Tasks</span></a>
+                <a href="?page=distribution" class="menu-link <?php echo $page === 'distribution' ? 'active' : ''; ?>"><i data-lucide="trending-up"></i> <span>Aid Distribution</span></a>
+                <a href="?page=report" class="menu-link <?php echo $page === 'report' ? 'active' : ''; ?>"><i data-lucide="file-text"></i> <span>Reports</span></a>
+                <a href="?page=chat" class="menu-link <?php echo $page === 'chat' ? 'active' : ''; ?>"><i data-lucide="message-square"></i> <span>Messages</span></a>
+                <a href="?page=settings" class="menu-link <?php echo $page === 'settings' ? 'active' : ''; ?>"><i data-lucide="settings"></i> <span>Settings</span></a>
+            </nav>
+            <div class="sidebar-footer">
+                <div style="display: flex; align-items: center; gap: 10px; padding: 10px; background: #f8fafc; border-radius: 12px; cursor: pointer;" onclick="location.href='logout.php'">
+                    <div style="width: 32px; height: 32px; border-radius: 8px; background: var(--primary); color: white; display: grid; place-items: center; font-weight: 700;"><?php echo strtoupper(substr($user['full_name'], 0, 1)); ?></div>
+                    <div style="flex: 1; overflow: hidden;"><p style="font-size: 0.8rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"><?php echo htmlspecialchars($user['full_name']); ?></p></div>
+                    <i data-lucide="log-out" style="width: 14px; color: var(--danger);"></i>
+                </div>
+            </div>
         </aside>
+
         <main class="main">
-            <div class="topbar">
-                <div class="topbar-left">
-                    <div class="topbar-title">Camp Manager Dashboard</div>
-                    <div class="topbar-subtitle">Managing: <?php echo htmlspecialchars($camp_name); ?></div>
+            <header class="header">
+                <div><h1 class="header-title"><?php echo ucfirst(str_replace('_', ' ', $page)); ?></h1><span class="header-subtitle"><?php 
+                    if($page === 'families') echo 'Register and manage camp residents';
+                    elseif($page === 'volunteers') echo 'Volunteers assigned to this camp';
+                    elseif($page === 'inventory') echo 'Manage camp inventory';
+                    else echo 'Managing: ' . htmlspecialchars($camp_name); 
+                ?></span></div>
+                <div class="header-actions">
+                    <?php if ($page === 'families'): ?>
+                        <button class="btn btn-primary" style="background: #0f172a;" onclick="toggleModal('registerModal')"><i data-lucide="plus" style="width:18px;"></i> Register Family</button>
+                    <?php elseif ($page === 'volunteers'): ?>
+                        <button class="btn btn-primary" style="background: #0f172a;" onclick="toggleModal('addVolunteerModal')"><i data-lucide="user-plus" style="width:18px;"></i> Add Volunteer</button>
+                    <?php else: ?>
+                        <button class="btn btn-outline" onclick="location.reload()"><i data-lucide="refresh-cw" style="width:18px;"></i></button>
+                        <button class="btn btn-primary" onclick="location.href='?page=report'"><i data-lucide="file-text" style="width:18px;"></i> Report</button>
+                    <?php endif; ?>
                 </div>
-                <div class="topbar-actions">
-                    <button type="button" class="btn-secondary" onclick="location.href='camp_manager_dashboard.php?page=report'">Generate Report</button>
-                    <div class="notification">🔔 <?php if ($unread_count > 0): ?>
-                        <span class="notification-badge"><?php echo $unread_count; ?></span>
-                    <?php endif; ?></div>
-                    <div style="position: relative;">
-                        <button class="profile-button" onclick="toggleProfileMenu()">
-                            <div class="profile-avatar"><?php echo strtoupper(substr(trim($user['full_name']), 0, 1)); ?></div>
-                            <div class="profile-details">
-                                <span class="profile-name"><?php echo htmlspecialchars($user['full_name']); ?></span>
-                                <span class="profile-role">Camp Manager</span>
-                            </div>
-                        </button>
-                        <div id="profileDropdown" class="profile-dropdown">
-                            <div class="dropdown-header">
-                                <p style="font-weight: 700; font-size: 0.9rem;"><?php echo htmlspecialchars($user['full_name']); ?></p>
-                                <p style="font-size: 0.75rem; color: #6b7280;"><?php echo htmlspecialchars($user['email']); ?></p>
-                            </div>
-                            <a href="camp_manager_dashboard.php?page=profile" class="dropdown-item">👤 My Profile</a>
-                            <a href="camp_manager_dashboard.php?page=settings" class="dropdown-item">⚙️ Settings</a>
-                            <div style="border-top: 1px solid #f3f4f6;"></div>
-                            <a href="logout.php" class="dropdown-item logout">🚪 Log Out</a>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            </header>
+
             <div class="content">
-                <?php if ($success_msg): ?>
-                    <div style="background: #ecfdf5; color: #065f46; padding: 1rem; border-radius: 12px; margin-bottom: 1.5rem; border: 1px solid #a7f3d0;">
-                        ✅ <?php echo $success_msg; ?>
-                    </div>
-                <?php endif; ?>
-                <?php if ($error_msg): ?>
-                    <div style="background: #fef2f2; color: #991b1b; padding: 1rem; border-radius: 12px; margin-bottom: 1.5rem; border: 1px solid #fecaca;">
-                        ❌ <?php echo $error_msg; ?>
-                    </div>
-                <?php endif; ?>
+                <?php if ($success_msg): ?><div style="background: #dcfce7; color: #166534; padding: 1rem; border-radius: 12px; margin-bottom: 1.5rem; border: 1px solid #bbf7d0;">✅ <?php echo $success_msg; ?></div><?php endif; ?>
+                <?php if ($error_msg): ?><div style="background: #fef2f2; color: #991b1b; padding: 1rem; border-radius: 12px; margin-bottom: 1.5rem; border: 1px solid #fecaca;">❌ <?php echo $error_msg; ?></div><?php endif; ?>
 
                 <?php if ($page === 'dashboard'): ?>
                     <div class="stats-grid">
                         <?php foreach ($stats as $stat): ?>
                             <div class="stat-card">
-                                <div class="stat-text">
-                                    <span class="stat-label"><?php echo $stat['label']; ?></span>
-                                    <span class="stat-value"><?php echo $stat['value']; ?></span>
-                                    <?php if ($stat['meta']): ?><span class="stat-meta"><?php echo $stat['meta']; ?></span><?php endif; ?>
-                                </div>
-                                <div class="stat-icon" style="background: <?php echo $stat['color']; ?>15; color: <?php echo $stat['color']; ?>;"><?php echo $stat['icon']; ?></div>
+                                <div><p style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600;"><?php echo $stat['label']; ?></p><p style="font-size: 1.75rem; font-weight: 800;"><?php echo $stat['value']; ?> <span style="font-size: 0.8rem; color: #94a3b8; font-weight: 500;"><?php echo $stat['meta']; ?></span></p></div>
+                                <div class="stat-icon-box" style="background: <?php echo $stat['color']; ?>15; color: <?php echo $stat['color']; ?>;"><i data-lucide="<?php echo $stat['icon']; ?>"></i></div>
                             </div>
                         <?php endforeach; ?>
                     </div>
-                    
-                    <div class="dashboard-main-grid">
+                    <div style="display: grid; grid-template-columns: 1.6fr 1fr; gap: 1.5rem;">
                         <div class="panel">
-                            <div class="panel-heading"><h3>Supply Levels</h3><button class="btn-secondary" style="font-size: 0.8rem; padding: 0.5rem 1rem;" onclick="location.href='camp_manager_dashboard.php?page=inventory'">View Details</button></div>
-                            <div class="chart-container">
-                                <?php 
-                                $max_qty = 0;
-                                foreach($chart_data as $item) if($item['quantity'] > $max_qty) $max_qty = $item['quantity'];
-                                if($max_qty == 0) $max_qty = 1;
-                                
-                                foreach ($chart_data as $item): 
-                                    $h = ($item['quantity'] / $max_qty) * 100;
-                                ?>
-                                    <div class="chart-bar-wrapper">
-                                        <div class="chart-bar-bg">
-                                            <div class="chart-bar" style="height: <?php echo $h; ?>%;"></div>
-                                        </div>
-                                        <div class="chart-label" title="<?php echo htmlspecialchars($item['item_name']); ?>"><?php echo htmlspecialchars($item['item_name']); ?></div>
-                                        <div class="chart-value"><?php echo round($item['quantity']); ?></div>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
+                            <div class="panel-header"><h3 class="panel-title">Supply Levels</h3><button class="btn btn-outline btn-sm" onclick="location.href='?page=inventory'">Details</button></div>
+                            <div class="panel-content"><div class="chart-container"><div class="chart-grid"><?php $max_qty = 0; foreach($chart_data as $item) if($item['quantity'] > $max_qty) $max_qty = $item['quantity']; if($max_qty == 0) $max_qty = 100; foreach([1, 0.75, 0.5, 0.25, 0] as $s): ?><div class="chart-grid-line" data-value="<?php echo round($max_qty * $s); ?>"></div><?php endforeach; ?></div><div class="chart-bars-area"><?php foreach ($chart_data as $item): $h = ($item['quantity'] / $max_qty) * 100; ?><div class="chart-bar" style="height: <?php echo $h; ?>%;"></div><?php endforeach; ?></div><div class="chart-bar-labels"><?php foreach ($chart_data as $item): ?><div class="chart-bar-label"><?php echo htmlspecialchars($item['item_name']); ?></div><?php endforeach; ?></div></div></div>
                         </div>
-                        
                         <div class="panel">
-                            <div class="panel-heading"><h3>Recent Distributions</h3><button class="btn-secondary" style="font-size: 0.8rem; padding: 0.5rem 1rem;" onclick="location.href='camp_manager_dashboard.php?page=distribution'">View All</button></div>
-                            <div class="dist-list">
-                                <?php if (empty($recent_distributions)): ?>
-                                    <p style="text-align: center; color: #94a3b8; padding: 2rem;">No recent distributions.</p>
-                                <?php else: ?>
-                                    <?php foreach ($recent_distributions as $dist): ?>
-                                        <div class="dist-item">
-                                            <div class="dist-info">
-                                                <span class="dist-name"><?php echo htmlspecialchars($dist['recipient_name']); ?></span>
-                                                <span class="dist-details"><?php echo htmlspecialchars($dist['items']); ?></span>
-                                            </div>
-                                            <span class="dist-date"><?php echo date('Y-m-d', strtotime($dist['distributed_at'])); ?></span>
-                                        </div>
-                                    <?php endforeach; ?>
-                                <?php endif; ?>
+                            <div class="panel-header"><h3 class="panel-title">Recent Distributions</h3><button class="btn btn-outline btn-sm" onclick="location.href='?page=distribution'">Log New</button></div>
+                            <div class="panel-content">
+                                <?php foreach (array_slice($recent_distributions, 0, 4) as $dist): ?>
+                                    <div style="padding: 1rem; background: #f8fafc; border-radius: 12px; margin-bottom: 10px; display: flex; justify-content: space-between;"><div><p style="font-weight: 700; font-size: 0.9rem;"><?php echo htmlspecialchars($dist['recipient_name']); ?></p><p style="font-size: 0.8rem; color: var(--text-muted);"><?php echo htmlspecialchars($dist['items']); ?></p></div><p style="font-size: 0.75rem; color: #94a3b8; font-weight: 600;"><?php echo date('M d', strtotime($dist['distributed_at'])); ?></p></div>
+                                <?php endforeach; ?>
                             </div>
                         </div>
                     </div>
-
                     <div class="panel">
-                        <div class="panel-heading"><h3>Registered Families</h3><small>Recent additions to the camp registry</small></div>
-                        <table class="table" style="box-shadow: none; border: 1px solid #f1f5f9;">
-                            <thead><tr><th>Head of Family</th><th>Members</th><th>Village</th><th>Needs</th><th>Registered</th></tr></thead>
-                            <tbody>
-                                <?php foreach (array_slice($families, 0, 5) as $family): ?>
-                                    <tr>
-                                        <td><div style="font-weight: 700; color: #1e293b;"><?php echo htmlspecialchars($family['head_name']); ?></div></td>
-                                        <td><strong><?php echo htmlspecialchars($family['family_members']); ?></strong></td>
-                                        <td><?php echo htmlspecialchars($family['village']); ?></td>
-                                        <td><div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><?php echo htmlspecialchars($family['needs']); ?></div></td>
-                                        <td><?php echo date('M d, Y', strtotime($family['created_at'])); ?></td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                <?php elseif ($page === 'inventory'): ?>
-                    <div class="panel" style="margin-bottom: 1.5rem;">
-                        <div class="panel-heading"><h3>Add New Item</h3><small>Add new supplies to camp inventory</small></div>
-                        <form method="POST" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; align-items: end;">
-                            <input type="hidden" name="action" value="add_inventory">
-                            <div class="form-field" style="margin-bottom:0;"><label>Item Name</label><input type="text" name="item_name" placeholder="e.g. Blankets" required></div>
-                            <div class="form-field" style="margin-bottom:0;"><label>Category</label><input type="text" name="category" placeholder="e.g. Supplies"></div>
-                            <div class="form-field" style="margin-bottom:0;"><label>Quantity</label><input type="number" name="quantity" value="0" step="0.01"></div>
-                            <div class="form-field" style="margin-bottom:0;"><label>Unit</label><input type="text" name="unit" placeholder="e.g. pcs"></div>
-                            <button type="submit" class="btn-primary" style="height: 48px;">+ Add Item</button>
-                        </form>
-                    </div>
-                    <div class="panel">
-                        <div class="panel-heading"><h3>Inventory Status</h3><button class="btn-secondary" onclick="alert('Refill requested')">Request Refill</button></div>
-                        <table class="table">
-                            <thead><tr><th>Item</th><th>Category</th><th>Quantity</th><th>Status</th><th>Actions</th></tr></thead>
-                            <tbody>
-                                <?php foreach ($inventory as $row): ?>
-                                    <tr>
-                                        <td><?php echo htmlspecialchars($row['item_name']); ?></td>
-                                        <td><?php echo htmlspecialchars($row['category']); ?></td>
-                                        <td><strong><?php echo htmlspecialchars($row['quantity']) . ' ' . htmlspecialchars($row['unit']); ?></strong></td>
-                                        <td><span class="status-chip <?php echo str_replace(' ', '', strtolower($row['status'])); ?>"><?php echo htmlspecialchars($row['status']); ?></span></td>
-                                        <td>
-                                            <form method="POST" style="display:flex; gap:0.5rem;">
-                                                <input type="hidden" name="action" value="update_inventory">
-                                                <input type="hidden" name="item_id" value="<?php echo $row['id']; ?>">
-                                                <input type="number" name="quantity" value="<?php echo $row['quantity']; ?>" style="width:70px; padding:0.3rem;" step="0.01">
-                                                <button type="submit" class="btn-secondary" style="padding:0.3rem 0.6rem;">Update</button>
-                                            </form>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                <?php elseif ($page === 'families'): ?>
-                    <div class="panel">
-                        <div class="panel-heading"><h3>Registered Families</h3><button class="btn-primary" onclick="alert('Use the dashboard form to register new families')">+ New Family</button></div>
-                        <table class="table">
-                            <thead><tr><th>Head of Family</th><th>Members</th><th>Village</th><th>Needs</th><th>Registered</th></tr></thead>
-                            <tbody>
-                                <?php foreach ($families as $family): ?>
-                                    <tr>
-                                        <td><?php echo htmlspecialchars($family['head_name']); ?></td>
-                                        <td><strong><?php echo htmlspecialchars($family['family_members']); ?></strong></td>
-                                        <td><?php echo htmlspecialchars($family['village']); ?></td>
-                                        <td><?php echo htmlspecialchars($family['needs']); ?></td>
-                                        <td><?php echo date('M d, Y', strtotime($family['created_at'])); ?></td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                <?php elseif ($page === 'report'): ?>
-                    <div class="panel">
-                        <div class="panel-heading"><h3>Camp Operational Report</h3><button class="btn-primary" onclick="window.print()">🖨️ Print Report</button></div>
-                        <div style="padding: 1rem; border: 1px solid #e5e7eb; border-radius: 12px; background: #f9fafb;">
-                            <h4 style="margin-bottom: 1rem;">Summary for <?php echo htmlspecialchars($camp_name); ?></h4>
-                            <p><strong>Date:</strong> <?php echo date('F d, Y'); ?></p>
-                            <hr style="margin: 1rem 0; border: none; border-top: 1px solid #e5e7eb;">
-                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem;">
-                                <div>
-                                    <p><strong>Total Families:</strong> <?php echo $stats[0]['value']; ?></p>
-                                    <p><strong>Total Occupancy:</strong> <?php echo $stats[1]['value']; ?> people</p>
-                                </div>
-                                <div>
-                                    <p><strong>Pending Tasks:</strong> <?php echo $conn->query("SELECT COUNT(*) FROM tasks WHERE camp_id = $camp_id AND status = 'pending'")->fetch_row()[0]; ?></p>
-                                    <p><strong>Completed Tasks:</strong> <?php echo $conn->query("SELECT COUNT(*) FROM tasks WHERE camp_id = $camp_id AND status = 'completed'")->fetch_row()[0]; ?></p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                <?php elseif ($page === 'chat'): ?>
-                    <div class="panel" style="max-width: 800px;">
-                        <div class="panel-heading"><h3>Camp Communication</h3><small>Team messaging hub</small></div>
-                        <div style="height: 350px; background: #f8fafc; border-radius: 18px; padding: 1.5rem; overflow-y: auto; margin-bottom: 1.5rem;">
-                            <div style="background: white; padding: 1rem; border-radius: 14px; max-width: 80%; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">Attention all volunteers: Food supplies have arrived. Please report for distribution.</div>
-                        </div>
-                        <div style="display: flex; gap: 1rem;"><input type="text" placeholder="Type message..." style="flex: 1; border: 1px solid #d1d5db; border-radius: 14px; padding: 0.95rem 1rem;"><button class="btn-primary">Send</button></div>
-                    </div>
-                <?php elseif ($page === 'volunteers'): ?>
-                    <div class="panel-heading" style="display: flex; justify-content: space-between; align-items: center;">
-                        <div><h3>Volunteer Assignments</h3><small>Track tasks and progress for each volunteer</small></div>
-                        <button class="btn-secondary" onclick="location.reload()">🔄 Refresh Updates</button>
+                        <div class="panel-header"><h3 class="panel-title">Registered Families</h3><button class="btn btn-outline btn-sm" onclick="location.href='?page=families'">View All</button></div>
+                        <div class="table-container"><table><thead><tr><th>Name</th><th>Members</th><th>Village</th><th>Needs</th><th>Date</th></tr></thead><tbody><?php foreach (array_slice($families, 0, 5) as $f): ?><tr><td><span style="font-weight: 600;"><?php echo htmlspecialchars($f['head_name']); ?></span></td><td><span class="badge" style="background:#f1f5f9;"><?php echo $f['family_members']; ?></span></td><td><?php echo htmlspecialchars($f['village']); ?></td><td><?php echo htmlspecialchars(substr($f['needs'], 0, 40)); ?>...</td><td style="color: #94a3b8;"><?php echo date('M d', strtotime($f['created_at'])); ?></td></tr><?php endforeach; ?></tbody></table></div>
                     </div>
 
-                    <div class="panel" style="margin-bottom: 1.5rem;">
-                        <div class="panel-heading"><h3>Assign New Volunteer</h3><small>Add available volunteers to your camp team</small></div>
-                        <form method="POST" style="display: flex; gap: 1rem; align-items: end;">
-                            <input type="hidden" name="action" value="assign_volunteer_to_camp">
-                            <div class="form-field" style="flex: 1; margin-bottom: 0;">
-                                <label>Select Volunteer</label>
-                                <select name="volunteer_id" required>
-                                    <option value="">Choose a volunteer...</option>
-                                    <?php 
-                                    $avail_vols = $conn->query("SELECT id, full_name FROM users WHERE role = 'volunteer' AND id NOT IN (SELECT volunteer_id FROM volunteer_assignments WHERE camp_id = $camp_id AND status = 'active')");
-                                    while($av = $avail_vols->fetch_assoc()): ?>
-                                        <option value="<?php echo $av['id']; ?>"><?php echo htmlspecialchars($av['full_name']); ?></option>
-                                    <?php endwhile; ?>
-                                </select>
-                            </div>
-                            <button type="submit" class="btn-primary" style="height: 48px;">Assign to Camp</button>
-                        </form>
-                    </div>
-
+                <?php elseif ($page === 'overview'): ?>
                     <?php
-                    $vol_query = $conn->query("SELECT u.id, u.full_name, u.email, u.phone 
-                        FROM users u 
-                        JOIN volunteer_assignments va ON u.id = va.volunteer_id 
-                        WHERE va.camp_id = $camp_id AND va.status = 'active'");
-                    
-                    if ($vol_query && $vol_query->num_rows > 0):
-                        while ($vol = $vol_query->fetch_assoc()):
-                            $vol_id = $vol['id'];
-                            $tasks_query = $conn->query("SELECT * FROM tasks WHERE assigned_to = $vol_id AND camp_id = $camp_id ORDER BY created_at DESC");
+                    $occupancy_rate = ($camp['capacity'] > 0) ? round(($camp['current_occupancy'] / $camp['capacity']) * 100, 1) : 0;
+                    $available_spaces = ($camp['capacity'] ?? 500) - ($camp['current_occupancy'] ?? 0);
                     ?>
-                        <div class="panel vol-card">
-                            <div class="vol-header">
-                                <div class="vol-info">
-                                    <div class="vol-avatar"><?php echo strtoupper(substr($vol['full_name'], 0, 1)); ?></div>
-                                    <div>
-                                        <div style="font-weight: 700;"><?php echo htmlspecialchars($vol['full_name']); ?></div>
-                                        <div style="font-size: 0.85rem; color: #6b7280;"><?php echo htmlspecialchars($vol['email']); ?> | <?php echo htmlspecialchars($vol['phone']); ?></div>
-                                    </div>
-                                </div>
-                                <div style="text-align: right;">
-                                    <?php 
-                                    $count_res = $conn->query("SELECT COUNT(*) as total, SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as done FROM tasks WHERE assigned_to = $vol_id AND camp_id = $camp_id");
-                                    $counts = $count_res->fetch_assoc();
-                                    $progress = ($counts['total'] > 0) ? round(($counts['done'] / $counts['total']) * 100) : 0;
-                                    ?>
-                                    <div style="font-size: 0.85rem; font-weight: 600;">Progress: <?php echo $progress; ?>%</div>
-                                    <div style="width: 100px; height: 6px; background: #e5e7eb; border-radius: 3px; margin-top: 4px; overflow: hidden;">
-                                        <div style="width: <?php echo $progress; ?>%; height: 100%; background: #22c55e;"></div>
-                                    </div>
-                                </div>
+                    <div class="ov-info-grid">
+                        <div class="ov-card">
+                            <div style="font-weight: 700; font-size: 1rem; margin-bottom: 2rem;">Camp Information</div>
+                            
+                            <div class="ov-info-item">
+                                <div class="ov-info-icon"><i data-lucide="map-pin"></i></div>
+                                <div><p style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">Location</p><p style="font-weight: 700;"><?php echo htmlspecialchars($camp_location); ?></p></div>
                             </div>
                             
-                            <table class="table" style="box-shadow: none; border: 1px solid #f3f4f6;">
-                                <thead><tr><th style="font-size: 0.85rem;">Task Name</th><th style="font-size: 0.85rem;">Priority</th><th style="font-size: 0.85rem;">Status</th><th style="font-size: 0.85rem;">Assigned</th><th style="font-size: 0.85rem;">Finished At</th></tr></thead>
+                            <div class="ov-info-item">
+                                <div class="ov-info-icon" style="color: #f59e0b;"><i data-lucide="alert-triangle"></i></div>
+                                <div><p style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">Disaster Type</p><p style="font-weight: 700;">Flood</p></div>
+                            </div>
+                            
+                            <div class="ov-info-item">
+                                <div class="ov-info-icon" style="color: #10b981;"><i data-lucide="users"></i></div>
+                                <div><p style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">Capacity</p><p style="font-weight: 700;"><?php echo ($camp['current_occupancy'] ?? 0); ?> / <?php echo ($camp['capacity'] ?? 500); ?> people</p></div>
+                            </div>
+                            
+                            <div class="ov-progress-container">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;"><span style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted);">Occupancy Rate</span><span style="font-size: 0.8rem; font-weight: 700;"><?php echo $occupancy_rate; ?>%</span></div>
+                                <div class="ov-progress-bar"><div class="ov-progress-fill" style="width: <?php echo $occupancy_rate; ?>%;"></div></div>
+                            </div>
+                            
+                            <div style="margin-top: 1.5rem;"><span class="badge" style="background: #ecfdf5; color: #166534; padding: 6px 14px; font-size: 0.75rem;">ACTIVE</span></div>
+                        </div>
+                        
+                        <div>
+                            <div class="ov-card" style="height: 100%;">
+                                <div style="font-weight: 700; font-size: 1rem; margin-bottom: 1.5rem;">Quick Stats</div>
+                                
+                                <div class="quick-stat-card qs-blue">
+                                    <div class="qs-value"><?php echo ($camp['current_occupancy'] ?? 0); ?></div>
+                                    <div class="qs-label">Current Residents</div>
+                                </div>
+                                
+                                <div class="quick-stat-card qs-green">
+                                    <div class="qs-value"><?php echo $available_spaces; ?></div>
+                                    <div class="qs-label">Available Spaces</div>
+                                </div>
+                                
+                                <div class="quick-stat-card qs-purple">
+                                    <div class="qs-value">24/7</div>
+                                    <div class="qs-label">Operation Hours</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="ov-card">
+                        <div style="font-weight: 700; font-size: 1rem; margin-bottom: 1.5rem;">Facilities & Amenities</div>
+                        <div class="facilities-grid">
+                            <?php 
+                            $facilities = ['Medical Unit', 'Food Distribution', 'Shelter Area', 'Sanitation', 'Children Area', 'Counseling', 'Supply Storage', 'Security'];
+                            foreach($facilities as $f): ?>
+                                <div class="facility-item">
+                                    <div class="facility-name"><?php echo $f; ?></div>
+                                    <div class="facility-status">Available</div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+
+                <?php elseif ($page === 'families'): ?>
+                    <?php
+                    $total_reg = $conn->query("SELECT COUNT(*) FROM families WHERE camp_id = $camp_id")->fetch_row()[0];
+                    $total_ind = $conn->query("SELECT SUM(family_members) FROM families WHERE camp_id = $camp_id")->fetch_row()[0] ?? 0;
+                    $new_week = $conn->query("SELECT COUNT(*) FROM families WHERE camp_id = $camp_id AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)")->fetch_row()[0];
+                    ?>
+                    <div class="ap-stats-grid">
+                        <div class="ap-stat-card">
+                            <p class="ap-stat-label">Total Registered</p>
+                            <p class="ap-stat-value"><?php echo $total_reg; ?></p>
+                        </div>
+                        <div class="ap-stat-card">
+                            <p class="ap-stat-label">Total Individuals</p>
+                            <p class="ap-stat-value" style="color: #2563eb;"><?php echo $total_ind; ?></p>
+                        </div>
+                        <div class="ap-stat-card">
+                            <p class="ap-stat-label">New This Week</p>
+                            <p class="ap-stat-value" style="color: #10b981;"><?php echo $new_week; ?></p>
+                        </div>
+                    </div>
+
+                    <div class="ap-table-panel">
+                        <div class="ap-table-header">Registered Families & Individuals</div>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Family Members</th>
+                                        <th>Needs</th>
+                                        <th>Registered Date</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
                                 <tbody>
-                                    <?php if ($tasks_query && $tasks_query->num_rows > 0): ?>
-                                        <?php while ($t = $tasks_query->fetch_assoc()): ?>
-                                            <tr>
-                                                <td><div style="font-weight: 600;"><?php echo htmlspecialchars($t['task_name']); ?></div></td>
-                                                <td><span class="badge" style="background: <?php echo $t['priority'] === 'high' ? '#fee2e2' : ($t['priority'] === 'medium' ? '#fef3c7' : '#eff6ff'); ?>; color: <?php echo $t['priority'] === 'high' ? '#991b1b' : ($t['priority'] === 'medium' ? '#92400e' : '#1e40af'); ?>;"><?php echo strtoupper($t['priority']); ?></span></td>
-                                                <td><span class="status-chip <?php echo 'status-' . str_replace('_', '', strtolower($t['status'])); ?>"><?php echo ucfirst(str_replace('_', ' ', $t['status'])); ?></span></td>
-                                                <td><small><?php echo date('M d, H:i', strtotime($t['created_at'])); ?></small></td>
-                                                <td><small><?php echo $t['completed_date'] ? date('M d, H:i', strtotime($t['completed_date'])) : '-'; ?></small></td>
-                                            </tr>
-                                        <?php endwhile; ?>
+                                    <?php if (empty($families)): ?>
+                                        <tr><td colspan="5" style="text-align:center; padding: 3rem; color: var(--text-muted);">No residents registered yet.</td></tr>
                                     <?php else: ?>
-                                        <tr><td colspan="4" style="text-align: center; color: #9ca3af;">No tasks assigned to this volunteer.</td></tr>
+                                        <?php foreach ($families as $f): ?>
+                                            <tr>
+                                                <td><span style="font-weight: 600;"><?php echo htmlspecialchars($f['head_name']); ?></span></td>
+                                                <td><?php echo $f['family_members']; ?></td>
+                                                <td><span style="color: var(--text-muted);"><?php echo htmlspecialchars($f['needs']); ?></span></td>
+                                                <td><?php echo date('Y-m-d', strtotime($f['created_at'])); ?></td>
+                                                <td><span class="badge status-badge-assigned">assigned</span></td>
+                                            </tr>
+                                        <?php endforeach; ?>
                                     <?php endif; ?>
                                 </tbody>
                             </table>
                         </div>
-                    <?php endwhile; ?>
-                    <?php else: ?>
-                        <div class="panel" style="text-align: center; padding: 3rem;">
-                            <div style="font-size: 3rem; margin-bottom: 1rem;">🧑‍🤝‍🧑</div>
-                            <h3>No Volunteers Assigned</h3>
-                            <p style="color: #6b7280;">There are currently no volunteers assigned to this camp.</p>
+                    </div>
+
+                    <!-- Registration Modal -->
+                    <div id="registerModal" class="modal">
+                        <div class="modal-content">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                                <h3 style="font-size: 1.25rem; font-weight: 700;">Register New Family</h3>
+                                <button onclick="toggleModal('registerModal')" style="background: none; border: none; cursor: pointer; color: var(--text-muted);"><i data-lucide="x"></i></button>
+                            </div>
+                            <form method="POST">
+                                <input type="hidden" name="action" value="register_family">
+                                <div class="form-group"><label>Head of Family</label><input type="text" name="head_name" class="form-control" placeholder="Full name" required></div>
+                                <div class="form-group"><label>Family Members</label><input type="number" name="family_members" class="form-control" value="1" min="1" required></div>
+                                <div class="form-group"><label>Village / District</label><input type="text" name="village" class="form-control" placeholder="Area of origin"></div>
+                                <div class="form-group"><label>Special Needs</label><textarea name="needs" class="form-control" style="min-height: 80px;" placeholder="e.g. Medical, Food, Clothing"></textarea></div>
+                                <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px; background: #0f172a;">Register Resident</button>
+                            </form>
                         </div>
-                    <?php endif; ?>
+                    </div>
+
+                <?php elseif ($page === 'inventory'): ?>
+                    <?php
+                    $total_items = $conn->query("SELECT COUNT(*) FROM inventory WHERE camp_id = $camp_id")->fetch_row()[0];
+                    $low_stock = $conn->query("SELECT COUNT(*) FROM inventory WHERE camp_id = $camp_id AND quantity <= min_threshold")->fetch_row()[0];
+                    $food_items = $conn->query("SELECT COUNT(*) FROM inventory WHERE camp_id = $camp_id AND category LIKE '%food%'")->fetch_row()[0];
+                    $med_items = $conn->query("SELECT COUNT(*) FROM inventory WHERE camp_id = $camp_id AND category LIKE '%medicine%'")->fetch_row()[0];
+                    ?>
+                    <div class="supplies-stats">
+                        <div class="supplies-stat-card">
+                            <div class="supplies-stat-icon" style="background: #eff6ff; color: #2563eb;"><i data-lucide="package" style="width:18px;"></i></div>
+                            <p style="font-size: 1.5rem; font-weight: 800;"><?php echo $total_items; ?></p>
+                            <p style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">Total Items</p>
+                        </div>
+                        <div class="supplies-stat-card">
+                            <div class="supplies-stat-icon" style="background: #fef2f2; color: #dc2626;"><i data-lucide="alert-triangle" style="width:18px;"></i></div>
+                            <p style="font-size: 1.5rem; font-weight: 800;"><?php echo $low_stock; ?></p>
+                            <p style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">Low Stock</p>
+                        </div>
+                        <div class="supplies-stat-card">
+                            <div class="supplies-stat-icon" style="background: #f0fdf4; color: #16a34a;"><i data-lucide="utensils" style="width:18px;"></i></div>
+                            <p style="font-size: 1.5rem; font-weight: 800;"><?php echo $food_items; ?></p>
+                            <p style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">Food Items</p>
+                        </div>
+                        <div class="supplies-stat-card">
+                            <div class="supplies-stat-icon" style="background: #faf5ff; color: #9333ea;"><i data-lucide="heart-pulse" style="width:18px;"></i></div>
+                            <p style="font-size: 1.5rem; font-weight: 800;"><?php echo $med_items; ?></p>
+                            <p style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">Medical Items</p>
+                        </div>
+                    </div>
+
+                    <div class="ap-table-panel">
+                        <div class="ap-table-header">Supply Inventory</div>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Item Name</th>
+                                        <th>Category</th>
+                                        <th>Quantity</th>
+                                        <th>Min Threshold</th>
+                                        <th>Status</th>
+                                        <th>Last Updated</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($inventory as $item): 
+                                        $is_low = $item['quantity'] <= $item['min_threshold'];
+                                        $cat_class = 'cat-other';
+                                        if(stripos($item['category'], 'food') !== false) $cat_class = 'cat-food';
+                                        elseif(stripos($item['category'], 'medicine') !== false || stripos($item['category'], 'medical') !== false) $cat_class = 'cat-medicine';
+                                        elseif(stripos($item['category'], 'shelter') !== false) $cat_class = 'cat-shelter';
+                                    ?>
+                                        <tr class="<?php echo $is_low ? 'low-stock-row' : ''; ?>">
+                                            <td>
+                                                <div style="display: flex; align-items: center; gap: 8px;">
+                                                    <?php if($is_low): ?><i data-lucide="alert-triangle" style="width:14px; color: #dc2626;"></i><?php endif; ?>
+                                                    <span style="font-weight: 600;"><?php echo htmlspecialchars($item['item_name']); ?></span>
+                                                </div>
+                                            </td>
+                                            <td><span class="category-badge <?php echo $cat_class; ?>"><?php echo htmlspecialchars($item['category']); ?></span></td>
+                                            <td><span class="<?php echo $is_low ? 'low-stock-text' : ''; ?>"><?php echo $item['quantity'] . ' ' . $item['unit']; ?></span></td>
+                                            <td><?php echo $item['min_threshold'] . ' ' . $item['unit']; ?></td>
+                                            <td><span class="<?php echo $is_low ? 'status-low' : 'status-ok'; ?>"><?php echo $is_low ? 'Low Stock' : 'OK'; ?></span></td>
+                                            <td style="color: var(--text-muted); font-size: 0.85rem;"><?php echo date('Y-m-d', strtotime($item['updated_at'] ?? $item['created_at'])); ?></td>
+                                            <td><button class="btn btn-outline btn-sm" onclick="openUpdateModal(<?php echo htmlspecialchars(json_encode($item)); ?>)">Update</button></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div style="margin-top: 1.5rem; text-align: right;">
+                            <button class="btn btn-primary" onclick="toggleModal('addItemModal')">+ Add New Item</button>
+                        </div>
+                    </div>
+
+                    <!-- Update Inventory Modal -->
+                    <div id="updateInventoryModal" class="modal">
+                        <div class="modal-content">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                                <h3 id="updateItemName" style="font-size: 1.25rem; font-weight: 700;">Update Item</h3>
+                                <button onclick="toggleModal('updateInventoryModal')" style="background: none; border: none; cursor: pointer;"><i data-lucide="x"></i></button>
+                            </div>
+                            <form method="POST">
+                                <input type="hidden" name="action" value="update_inventory_detailed">
+                                <input type="hidden" name="item_id" id="updateItemId">
+                                <div class="form-group"><label>Quantity</label><input type="number" name="quantity" id="updateItemQty" class="form-control" step="0.01" required></div>
+                                <div class="form-group"><label>Min Threshold</label><input type="number" name="min_threshold" id="updateItemThreshold" class="form-control" step="0.01" required></div>
+                                <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px;">Save Changes</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Add Item Modal -->
+                    <div id="addItemModal" class="modal">
+                        <div class="modal-content">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                                <h3 style="font-size: 1.25rem; font-weight: 700;">Add New Supply Item</h3>
+                                <button onclick="toggleModal('addItemModal')" style="background: none; border: none; cursor: pointer;"><i data-lucide="x"></i></button>
+                            </div>
+                            <form method="POST">
+                                <input type="hidden" name="action" value="add_inventory">
+                                <div class="form-group"><label>Item Name</label><input type="text" name="item_name" class="form-control" required></div>
+                                <div class="form-group"><label>Category</label><select name="category" class="form-control"><option value="Food">Food</option><option value="Medicine">Medicine</option><option value="Shelter">Shelter</option><option value="Other">Other</option></select></div>
+                                <div class="form-group"><label>Initial Qty</label><input type="number" name="quantity" class="form-control" step="0.01" required></div>
+                                <div class="form-group"><label>Unit</label><input type="text" name="unit" class="form-control" placeholder="e.g. kg, cases, boxes" required></div>
+                                <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px;">Add Item</button>
+                            </form>
+                        </div>
+                    </div>
+
+                <?php elseif ($page === 'volunteers'): ?>
+                    <div class="ap-table-panel">
+                        <div class="ap-table-header">Active Volunteers</div>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Email</th>
+                                        <th>Phone</th>
+                                        <th>Skills</th>
+                                        <th>Availability</th>
+                                        <th>Assigned Tasks</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($volunteers as $vol): 
+                                        $v_id = $vol['id'];
+                                        $t_count = $conn->query("SELECT COUNT(*) FROM tasks WHERE assigned_to = $v_id AND status != 'completed'")->fetch_row()[0];
+                                        $skills_arr = explode(',', $vol['skills'] ?? '');
+                                    ?>
+                                        <tr>
+                                            <td><span style="font-weight: 700;"><?php echo htmlspecialchars($vol['full_name']); ?></span></td>
+                                            <td style="color: var(--text-muted); font-size: 0.85rem;"><?php echo htmlspecialchars($vol['email']); ?></td>
+                                            <td style="color: var(--text-muted); font-size: 0.85rem;"><?php echo htmlspecialchars($vol['phone'] ?? 'N/A'); ?></td>
+                                            <td>
+                                                <?php foreach($skills_arr as $s): if(trim($s)): ?>
+                                                    <span class="skill-badge"><?php echo htmlspecialchars(trim($s)); ?></span>
+                                                <?php endif; endforeach; ?>
+                                            </td>
+                                            <td style="font-size: 0.85rem; font-weight: 500;"><?php echo htmlspecialchars($vol['availability'] ?? 'Full-time'); ?></td>
+                                            <td><span class="task-pill"><?php echo $t_count; ?> tasks</span></td>
+                                            <td>
+                                                <button class="btn btn-outline btn-sm" style="color: #4f46e5; border-color: #e0e7ff; gap: 4px;" onclick="location.href='?page=tasks&vol=<?php echo $v_id; ?>'">
+                                                    <i data-lucide="clipboard-list" style="width:14px;"></i> Assign Task
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Add Volunteer Modal -->
+                    <div id="addVolunteerModal" class="modal">
+                        <div class="modal-content">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                                <h3 style="font-size: 1.25rem; font-weight: 700;">Add New Volunteer</h3>
+                                <button onclick="toggleModal('addVolunteerModal')" style="background: none; border: none; cursor: pointer;"><i data-lucide="x"></i></button>
+                            </div>
+                            <form method="POST">
+                                <input type="hidden" name="action" value="add_volunteer">
+                                <div class="form-group"><label>Full Name</label><input type="text" name="full_name" class="form-control" placeholder="Sarah Johnson" required></div>
+                                <div class="form-group"><label>Email</label><input type="email" name="email" class="form-control" placeholder="sarah@example.com" required></div>
+                                <div class="form-group"><label>Phone</label><input type="text" name="phone" class="form-control" placeholder="555-0101"></div>
+                                <div class="form-group"><label>Skills (Comma separated)</label><input type="text" name="skills" class="form-control" placeholder="Medical, First Aid, Logistics"></div>
+                                <div class="form-group"><label>Availability</label><input type="text" name="availability" class="form-control" placeholder="Full-time, Weekdays"></div>
+                                <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px; background: #0f172a;">Register Volunteer</button>
+                                <p style="font-size: 0.7rem; color: var(--text-muted); margin-top: 10px; text-align: center;">* Default password will be 'volunteer123'</p>
+                            </form>
+                        </div>
+                    </div>
+
+                <?php elseif ($page === 'tasks'): ?>
+                    <div class="panel" style="padding: 4rem; text-align: center; border-style: dashed; background: transparent; opacity: 0.5;">
+                        <i data-lucide="clipboard-list" style="width: 48px; color: var(--text-muted); margin-bottom: 1rem;"></i>
+                        <h3>Tasks</h3>
+                    </div>
+
+                <?php elseif ($page === 'distribution'): ?>
+                    <div class="panel" style="padding: 4rem; text-align: center; border-style: dashed; background: transparent; opacity: 0.5;">
+                        <i data-lucide="truck" style="width: 48px; color: var(--text-muted); margin-bottom: 1rem;"></i>
+                        <h3>Aid Distribution</h3>
+                    </div>
+
+                <?php elseif ($page === 'report'): ?>
+                    <div class="panel" style="padding: 4rem; text-align: center; border-style: dashed; background: transparent; opacity: 0.5;">
+                        <i data-lucide="file-text" style="width: 48px; color: var(--text-muted); margin-bottom: 1rem;"></i>
+                        <h3>Reports</h3>
+                    </div>
+
+                <?php elseif ($page === 'messages'): ?>
+                    <div class="panel" style="padding: 4rem; text-align: center; border-style: dashed; background: transparent; opacity: 0.5;">
+                        <i data-lucide="message-square" style="width: 48px; color: var(--text-muted); margin-bottom: 1rem;"></i>
+                        <h3>Messages</h3>
+                    </div>
+
+                <?php elseif ($page === 'settings'): ?>
+                    <div class="panel" style="padding: 4rem; text-align: center; border-style: dashed; background: transparent; opacity: 0.5;">
+                        <i data-lucide="settings" style="width: 48px; color: var(--text-muted); margin-bottom: 1rem;"></i>
+                        <h3>Settings</h3>
+                    </div>
+
                 <?php else: ?>
-                    <div class="panel"><p>Module content for <strong><?php echo ucfirst($page); ?></strong> is being synchronized.</p></div>
+                    <div class="panel" style="padding: 4rem; text-align: center;">
+                        <i data-lucide="info" style="width: 48px; color: var(--text-muted); margin-bottom: 1rem;"></i>
+                        <h3>Coming Soon</h3>
+                        <p style="color: var(--text-muted);">The <strong><?php echo ucfirst($page); ?></strong> module is under development.</p>
+                    </div>
                 <?php endif; ?>
             </div>
         </main>
     </div>
     <script>
-        function toggleProfileMenu() {
-            const dropdown = document.getElementById('profileDropdown');
-            dropdown.classList.toggle('show');
-            
-            document.addEventListener('click', function closeMenu(e) {
-                if (!e.target.closest('.profile-button') && !e.target.closest('.profile-dropdown')) {
-                    dropdown.classList.remove('show');
-                    document.removeEventListener('click', closeMenu);
-                }
-            });
+        lucide.createIcons();
+        function toggleModal(id) {
+            const modal = document.getElementById(id);
+            if (modal) modal.classList.toggle('show');
+        }
+        function openUpdateModal(item) {
+            document.getElementById('updateItemId').value = item.id;
+            document.getElementById('updateItemName').innerText = 'Update: ' + item.item_name;
+            document.getElementById('updateItemQty').value = item.quantity;
+            document.getElementById('updateItemThreshold').value = item.min_threshold;
+            toggleModal('updateInventoryModal');
+        }
+        window.onclick = function(e) {
+            if (e.target.classList.contains('modal')) {
+                e.target.classList.remove('show');
+            }
         }
     </script>
 </body>
