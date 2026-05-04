@@ -83,6 +83,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error_msg = "Failed to update camp.";
             }
         }
+
+        // Add Manager Action
+        if ($action === 'add_manager') {
+            $name = sanitize($_POST['full_name']);
+            $email = sanitize($_POST['email']);
+            $phone = sanitize($_POST['phone']);
+            $password = password_hash($_POST['password'], PASSWORD_BCRYPT);
+            $location = sanitize($_POST['location'] ?? '');
+            
+            // Check if email exists
+            $check = $conn->query("SELECT id FROM users WHERE email = '$email'");
+            if ($check->num_rows > 0) {
+                $error_msg = "A user with this email already exists.";
+            } else {
+                $insert = $conn->query("INSERT INTO users (full_name, email, phone, password, role, location, status) VALUES ('$name', '$email', '$phone', '$password', 'camp_manager', '$location', 'active')");
+                if ($insert) {
+                    $success_msg = "Camp manager added successfully.";
+                } else {
+                    $error_msg = "Failed to add manager.";
+                }
+            }
+        }
+
+        // Edit Manager Action
+        if ($action === 'edit_manager') {
+            $mgr_id = intval($_POST['manager_id']);
+            $name = sanitize($_POST['full_name']);
+            $email = sanitize($_POST['email']);
+            $phone = sanitize($_POST['phone']);
+            $location = sanitize($_POST['location'] ?? '');
+            
+            $query = "UPDATE users SET full_name = '$name', email = '$email', phone = '$phone', location = '$location'";
+            if (!empty($_POST['password'])) {
+                $password = password_hash($_POST['password'], PASSWORD_BCRYPT);
+                $query .= ", password = '$password'";
+            }
+            $query .= " WHERE id = $mgr_id AND role = 'camp_manager'";
+            
+            if ($conn->query($query)) {
+                $success_msg = "Manager updated successfully.";
+            } else {
+                $error_msg = "Failed to update manager.";
+            }
+        }
+
+        // Delete Manager Action
+        if ($action === 'delete_manager') {
+            $mgr_id = intval($_POST['manager_id']);
+            // First unassign from camps
+            $conn->query("UPDATE camps SET manager_id = NULL WHERE manager_id = $mgr_id");
+            $delete = $conn->query("DELETE FROM users WHERE id = $mgr_id AND role = 'camp_manager'");
+            if ($delete) {
+                $success_msg = "Manager removed successfully.";
+            } else {
+                $error_msg = "Failed to remove manager.";
+            }
+        }
     }
 }
 
@@ -132,6 +189,22 @@ $managers_res = $conn->query("SELECT id, full_name FROM users WHERE role = 'camp
 $managers = [];
 while($row = $managers_res->fetch_assoc()) {
     $managers[] = $row;
+}
+
+// Fetch Detailed Managers List for Managers Page
+$managers_list = [];
+if ($page === 'managers') {
+    $managers_list_res = $conn->query("
+        SELECT u.*, GROUP_CONCAT(c.camp_name SEPARATOR ', ') as assigned_camps 
+        FROM users u 
+        LEFT JOIN camps c ON u.id = c.manager_id 
+        WHERE u.role = 'camp_manager' 
+        GROUP BY u.id
+        ORDER BY u.created_at DESC
+    ");
+    while($row = $managers_list_res->fetch_assoc()) {
+        $managers_list[] = $row;
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -267,6 +340,7 @@ while($row = $managers_res->fetch_assoc()) {
             </div>
             <ul class="menu">
                 <li class="menu-item"><a href="admin_dashboard.php?page=dashboard" class="menu-link <?php echo $page === 'dashboard' ? 'active' : ''; ?>"><span class="menu-icon">📊</span>Dashboard</a></li>
+                <li class="menu-item"><a href="admin_dashboard.php?page=managers" class="menu-link <?php echo $page === 'managers' ? 'active' : ''; ?>"><span class="menu-icon">👤</span>Camp Managers</a></li>
                 <li class="menu-item"><a href="admin_dashboard.php?page=camps" class="menu-link <?php echo $page === 'camps' ? 'active' : ''; ?>"><span class="menu-icon">⛺</span>Camps</a></li>
                 <li class="menu-item"><a href="admin_dashboard.php?page=volunteers" class="menu-link <?php echo $page === 'volunteers' ? 'active' : ''; ?>"><span class="menu-icon">🧑‍🤝‍🧑</span>Volunteers<span class="menu-badge">6</span></a></li>
                 <li class="menu-item"><a href="admin_dashboard.php?page=donations" class="menu-link <?php echo $page === 'donations' ? 'active' : ''; ?>"><span class="menu-icon">💵</span>Donations</a></li>
@@ -286,6 +360,8 @@ while($row = $managers_res->fetch_assoc()) {
                 <div class="topbar-actions">
                     <?php if ($page === 'camps'): ?>
                         <button type="button" class="btn-primary" onclick="openAddCampModal()">+ Add New Camp</button>
+                    <?php elseif ($page === 'managers'): ?>
+                        <button type="button" class="btn-primary" onclick="openAddManagerModal()">+ Add Manager</button>
                     <?php elseif ($page === 'volunteers'): ?>
                         <button type="button" class="btn-primary" onclick="alert('Invite functionality coming soon');">+ Invite Volunteer</button>
                     <?php elseif ($page === 'donations'): ?>
@@ -447,6 +523,86 @@ while($row = $managers_res->fetch_assoc()) {
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
+                    </div>
+                <?php elseif ($page === 'managers'): ?>
+                    <div class="page-header">
+                        <div>
+                            <div class="page-title">Camp Managers</div>
+                            <div class="page-subtitle">Manage camp manager accounts and assignments</div>
+                        </div>
+                        <button type="button" class="btn-primary" onclick="openAddManagerModal()">+ Add Manager</button>
+                    </div>
+
+                    <div class="search-box" style="margin-bottom: 1.5rem;">
+                        <input id="managerSearch" type="text" placeholder="Search managers by name, email or camp...">
+                    </div>
+                    
+                    <div class="panel">
+                        <div class="panel-heading">
+                            <h3>Active Camp Managers</h3>
+                        </div>
+                        <div style="overflow-x: auto;">
+                            <table class="table" id="managersTable">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Email</th>
+                                        <th>Phone</th>
+                                        <th>Assigned Camp</th>
+                                        <th>Joined Date</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php if (empty($managers_list)): ?>
+                                        <tr><td colspan="7" style="text-align:center; padding:3rem; color:#6b7280;">No camp managers found. Create your first manager to get started.</td></tr>
+                                    <?php endif; ?>
+                                    <?php foreach ($managers_list as $mgr): ?>
+                                        <tr class="manager-row">
+                                            <td>
+                                                <div style="display:flex; align-items:center; gap:0.75rem;">
+                                                    <div class="profile-avatar" style="width:36px; height:36px; font-size:0.9rem; background: #f0f9ff; color: #0369a1; border: 1px solid #bae6fd;">
+                                                        <?php echo strtoupper(substr($mgr['full_name'], 0, 1)); ?>
+                                                    </div>
+                                                    <div style="display:flex; flex-direction:column;">
+                                                        <span style="font-weight:600; color:#111827;"><?php echo htmlspecialchars($mgr['full_name']); ?></span>
+                                                        <span style="font-size:0.75rem; color:#6b7280;">ID: #<?php echo $mgr['id']; ?></span>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td><?php echo htmlspecialchars($mgr['email']); ?></td>
+                                            <td><?php echo htmlspecialchars($mgr['phone'] ?: 'N/A'); ?></td>
+                                            <td>
+                                                <?php if ($mgr['assigned_camps']): ?>
+                                                    <span style="display:inline-flex; align-items:center; gap:0.35rem; color:#2563eb; font-weight:500;">
+                                                        <span style="font-size:0.9rem;">🏠</span> <?php echo htmlspecialchars($mgr['assigned_camps']); ?>
+                                                    </span>
+                                                <?php else: ?>
+                                                    <span style="color:#9ca3af; font-style:italic;">Unassigned</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td><?php echo date('M d, Y', strtotime($mgr['created_at'])); ?></td>
+                                            <td><span class="badge active" style="background:#ecfdf5; color:#059669;">Active</span></td>
+                                            <td class="table-actions">
+                                                <div style="display:flex; gap:0.5rem;">
+                                                    <button class="btn-secondary" style="padding:0.5rem; border-radius:10px; width:36px; height:36px; display:grid; place-items:center;" onclick='openEditManagerModal(<?php echo json_encode($mgr); ?>)' title="Edit Manager">
+                                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                                                    </button>
+                                                    <form method="POST" onsubmit="return confirm('Are you sure you want to remove this manager? This will also unassign them from any camps.');" style="display:inline;">
+                                                        <input type="hidden" name="action" value="delete_manager">
+                                                        <input type="hidden" name="manager_id" value="<?php echo $mgr['id']; ?>">
+                                                        <button class="btn-danger" type="submit" style="padding:0.5rem; border-radius:10px; width:36px; height:36px; display:grid; place-items:center;" title="Delete Manager">
+                                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                                                        </button>
+                                                    </form>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 <?php elseif ($page === 'volunteers'): ?>
                     <div class="page-header">
@@ -632,6 +788,27 @@ while($row = $managers_res->fetch_assoc()) {
             document.getElementById('editCampModal').style.display = 'none';
         }
 
+        function openAddManagerModal() {
+            document.getElementById('addManagerModal').style.display = 'grid';
+        }
+
+        function closeAddManagerModal() {
+            document.getElementById('addManagerModal').style.display = 'none';
+        }
+
+        function openEditManagerModal(mgr) {
+            document.getElementById('edit_manager_id_val').value = mgr.id;
+            document.getElementById('edit_mgr_full_name').value = mgr.full_name;
+            document.getElementById('edit_mgr_email').value = mgr.email;
+            document.getElementById('edit_mgr_phone').value = mgr.phone;
+            document.getElementById('edit_mgr_location').value = mgr.location || '';
+            document.getElementById('editManagerModal').style.display = 'grid';
+        }
+
+        function closeEditManagerModal() {
+            document.getElementById('editManagerModal').style.display = 'none';
+        }
+
         function toggleProfileMenu() {
             const dropdown = document.getElementById('profileDropdown');
             dropdown.classList.toggle('show');
@@ -646,6 +823,81 @@ while($row = $managers_res->fetch_assoc()) {
             });
         }
     </script>
+
+    <!-- Add Manager Modal -->
+    <div id="addManagerModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:100; place-items:center; padding:2rem;">
+        <div class="panel" style="width:100%; max-width:500px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">
+            <div class="panel-heading">
+                <h3>Add New Camp Manager</h3>
+                <button type="button" onclick="closeAddManagerModal()" style="background:none; border:none; font-size:1.5rem; cursor:pointer;">&times;</button>
+            </div>
+            <form method="POST">
+                <input type="hidden" name="action" value="add_manager">
+                <div class="form-field">
+                    <label>Full Name</label>
+                    <input type="text" name="full_name" placeholder="Enter full name" required>
+                </div>
+                <div class="form-field">
+                    <label>Email Address</label>
+                    <input type="email" name="email" placeholder="manager@example.com" required>
+                </div>
+                <div class="form-field">
+                    <label>Phone Number</label>
+                    <input type="text" name="phone" placeholder="e.g. +88017..." required>
+                </div>
+                <div class="form-field">
+                    <label>Password</label>
+                    <input type="password" name="password" placeholder="Create a password" required>
+                </div>
+                <div class="form-field">
+                    <label>Location (Optional)</label>
+                    <input type="text" name="location" placeholder="e.g. Dhaka">
+                </div>
+                <div style="display:flex; gap:1rem; margin-top:1.5rem;">
+                    <button type="button" class="btn-secondary" style="flex:1;" onclick="closeAddManagerModal()">Cancel</button>
+                    <button type="submit" class="btn-primary" style="flex:1;">Add Manager</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Manager Modal -->
+    <div id="editManagerModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:100; place-items:center; padding:2rem;">
+        <div class="panel" style="width:100%; max-width:500px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">
+            <div class="panel-heading">
+                <h3>Edit Camp Manager</h3>
+                <button type="button" onclick="closeEditManagerModal()" style="background:none; border:none; font-size:1.5rem; cursor:pointer;">&times;</button>
+            </div>
+            <form method="POST">
+                <input type="hidden" name="action" value="edit_manager">
+                <input type="hidden" name="manager_id" id="edit_manager_id_val">
+                <div class="form-field">
+                    <label>Full Name</label>
+                    <input type="text" name="full_name" id="edit_mgr_full_name" required>
+                </div>
+                <div class="form-field">
+                    <label>Email Address</label>
+                    <input type="email" name="email" id="edit_mgr_email" required>
+                </div>
+                <div class="form-field">
+                    <label>Phone Number</label>
+                    <input type="text" name="phone" id="edit_mgr_phone" required>
+                </div>
+                <div class="form-field">
+                    <label>New Password (Leave blank to keep current)</label>
+                    <input type="password" name="password" placeholder="Enter new password">
+                </div>
+                <div class="form-field">
+                    <label>Location</label>
+                    <input type="text" name="location" id="edit_mgr_location">
+                </div>
+                <div style="display:flex; gap:1rem; margin-top:1.5rem;">
+                    <button type="button" class="btn-secondary" style="flex:1;" onclick="closeEditManagerModal()">Cancel</button>
+                    <button type="submit" class="btn-primary" style="flex:1;">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
     <!-- Edit Camp Modal -->
     <div id="editCampModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:100; place-items:center; padding:2rem;">
         <div class="panel" style="width:100%; max-width:500px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">
