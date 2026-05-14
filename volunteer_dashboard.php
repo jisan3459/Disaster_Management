@@ -83,6 +83,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         } else {
             $error_msg = "Error submitting report: " . $conn->error;
         }
+    } elseif ($_POST['action'] === 'create_task') {
+        $task_name = sanitize($_POST['task_name']);
+        $description = sanitize($_POST['description']);
+        $priority = sanitize($_POST['priority']);
+        $due_date = sanitize($_POST['due_date']);
+        $assignment_type = sanitize($_POST['assignment_type']);
+        
+        // If normal, assigned_to is NULL, otherwise it's the current user
+        $assignee = ($assignment_type === 'self') ? $user_id : null;
+        
+        $stmt = $conn->prepare("INSERT INTO tasks (task_name, description, camp_id, assigned_to, assigned_by, priority, due_date) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param("ssiiiss", $task_name, $description, $camp_id, $assignee, $user_id, $priority, $due_date);
+        
+        if ($stmt->execute()) {
+            $_SESSION['success_msg'] = "Task created successfully!";
+            header("Location: volunteer_dashboard.php?page=tasks");
+            exit();
+        } else {
+            $error_msg = "Error creating task: " . $conn->error;
+        }
     }
 }
 ?>
@@ -112,19 +132,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         /* Sidebar */
         .sidebar {
-            width: 260px;
+            width: 280px;
             background: white;
             color: #334155;
-            padding: 2rem 1rem;
-            border-right: 1px solid #e2e8f0;
+            padding: 1.5rem 1rem;
+            border-right: 1px solid #f1f5f9;
             overflow-y: auto;
             display: flex;
             flex-direction: column;
+            transition: all 0.3s ease;
         }
 
         .sidebar-logo {
-            padding: 0 1rem;
+            padding: 0.5rem 1rem;
             margin-bottom: 2.5rem;
+        }
+
+        .logo-title {
+            font-size: 1.4rem;
+            font-weight: 800;
+            color: #0f172a;
+            letter-spacing: -0.5px;
+            margin-bottom: 2px;
+        }
+
+        .logo-subtitle {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: #64748b;
         }
 
         .sidebar-menu {
@@ -132,40 +167,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
 
         .sidebar-menu li {
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.25rem;
         }
 
         .sidebar-menu a {
             display: flex;
             align-items: center;
-            gap: 1rem;
-            padding: 0.8rem 1rem;
-            color: #64748b;
+            gap: 12px;
+            padding: 0.75rem 1rem;
+            color: #475569;
             text-decoration: none;
-            transition: all 0.2s ease;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             font-size: 0.95rem;
             font-weight: 500;
-            border-radius: 12px;
+            border-radius: 10px;
+        }
+
+        .sidebar-menu a svg {
+            width: 20px;
+            height: 20px;
+            color: #64748b;
+            transition: color 0.2s;
         }
 
         .sidebar-menu a:hover {
             background: #f8fafc;
-            color: #334155;
+            color: #1e293b;
+        }
+
+        .sidebar-menu a:hover svg {
+            color: #1e293b;
         }
 
         .sidebar-menu a.active {
             background: #eff6ff;
-            color: #2563eb;
+            color: #3b82f6;
+        }
+
+        .sidebar-menu a.active svg {
+            color: #3b82f6;
         }
 
         .menu-badge {
             background: #ef4444;
             color: white;
             border-radius: 20px;
-            padding: 0.1rem 0.5rem;
-            font-size: 0.75rem;
-            font-weight: 600;
+            padding: 2px 8px;
+            font-size: 0.7rem;
+            font-weight: 700;
             margin-left: auto;
+            box-shadow: 0 2px 4px rgba(239, 68, 68, 0.2);
         }
 
         /* Header */
@@ -465,7 +516,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             font-size: 0.85rem;
             font-weight: 600;
             transition: all 0.3s;
-            flex: 1;
             text-align: center;
         }
 
@@ -552,6 +602,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         .task-item-actions {
             display: flex;
             gap: 0.5rem;
+        }
+
+        .task-item-actions .btn,
+        .task-buttons .btn {
+            flex: 1;
         }
 
         /* Chat Interface */
@@ -911,18 +966,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         <!-- Sidebar -->
         <aside class="sidebar">
             <div class="sidebar-logo">
-                <div style="font-size: 1.25rem; font-weight: 800; color: #1e293b; letter-spacing: -0.5px;">Relief System</div>
-                <div style="font-size: 0.85rem; font-weight: 500; color: #64748b; margin-top: 2px;">Volunteer</div>
+                <div class="logo-title">Relief System</div>
+                <div class="logo-subtitle">Volunteer</div>
             </div>
             <ul class="sidebar-menu">
                 <li>
                     <a href="volunteer_dashboard.php?page=dashboard" class="<?php echo ($page === 'dashboard') ? 'active' : ''; ?>">
-                        📊 Dashboard
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                        Dashboard
                     </a>
                 </li>
                 <li>
                     <a href="volunteer_dashboard.php?page=tasks" class="<?php echo ($page === 'tasks') ? 'active' : ''; ?>">
-                        ✓ My Tasks
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect><line x1="9" y1="12" x2="15" y2="12"></line><line x1="9" y1="16" x2="15" y2="16"></line><line x1="9" y1="8" x2="15" y2="8"></line></svg>
+                        My Tasks
                         <?php if ($stats['pending'] > 0 || $stats['in_progress'] > 0): ?>
                             <span class="menu-badge"><?php echo ($stats['pending'] + $stats['in_progress']); ?></span>
                         <?php endif; ?>
@@ -930,27 +987,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 </li>
                 <li>
                     <a href="volunteer_dashboard.php?page=schedule" class="<?php echo ($page === 'schedule') ? 'active' : ''; ?>">
-                        📅 Schedule
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                        Schedule
                     </a>
                 </li>
                 <li>
                     <a href="volunteer_dashboard.php?page=supplies" class="<?php echo ($page === 'supplies') ? 'active' : ''; ?>">
-                        📦 Supplies Delivered
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                        Supplies Delivered
                     </a>
                 </li>
                 <li>
                     <a href="volunteer_dashboard.php?page=field_reports" class="<?php echo ($page === 'field_reports') ? 'active' : ''; ?>">
-                        📋 Field Reports
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                        Field Reports
                     </a>
                 </li>
                 <li>
                     <a href="volunteer_dashboard.php?page=chat" class="<?php echo ($page === 'chat') ? 'active' : ''; ?>">
-                        💬 Messages
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                        Messages
                     </a>
                 </li>
                 <li>
                     <a href="volunteer_dashboard.php?page=settings" class="<?php echo ($page === 'settings') ? 'active' : ''; ?>">
-                        ⚙️ Settings
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                        Settings
                     </a>
                 </li>
             </ul>
@@ -1102,8 +1164,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
                 <?php elseif ($page === 'tasks'): ?>
                     <!-- My Tasks Page -->
-                    <h1 class="page-title">My Tasks</h1>
-                    <p class="page-subtitle">Manage all your assigned tasks</p>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                        <div>
+                            <h1 class="page-title">My Tasks</h1>
+                            <p class="page-subtitle">Manage all your assigned tasks</p>
+                        </div>
+                        <button class="btn btn-primary" style="padding: 0.5rem 1rem; border-radius: 8px; background: #2563eb; font-size: 0.85rem;" onclick="openCreateTaskModal()">+ Create New Task</button>
+                    </div>
+
+                    <?php if (isset($_SESSION['success_msg'])): ?>
+                        <div style="background: #dcfce7; color: #15803d; padding: 1rem; border-radius: 12px; margin-bottom: 2rem; border: 1px solid #bcf0da;">
+                            ✅ <?php echo $_SESSION['success_msg']; unset($_SESSION['success_msg']); ?>
+                        </div>
+                    <?php endif; ?>
 
                     <!-- Task Stats -->
                     <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr); margin-bottom: 2rem;">
@@ -1555,6 +1628,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         function closeModal() {
             document.getElementById('taskDetailsModal').classList.remove('active');
+            document.getElementById('createTaskModal').classList.remove('active');
+        }
+
+        function openCreateTaskModal() {
+            document.getElementById('createTaskModal').classList.add('active');
         }
 
         document.addEventListener('click', function(event) {
@@ -1602,12 +1680,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             </div>
         </div>
     </div>
+    <!-- Create Task Modal -->
+    <div class="modal-overlay" id="createTaskModal">
+        <div class="modal-content">
+            <div class="modal-close" onclick="closeModal()">×</div>
+            <div class="modal-header">
+                <div class="modal-title">Create New Task</div>
+                <p style="color: #64748b; font-size: 0.9rem;">Assign a new task to yourself</p>
+            </div>
+            <div class="modal-body">
+                <form method="POST" action="volunteer_dashboard.php?page=tasks">
+                    <input type="hidden" name="action" value="create_task">
+                    
+                    <div class="form-group">
+                        <label>Task Name <span class="required">*</span></label>
+                        <input type="text" name="task_name" placeholder="e.g. Clean distribution area" required style="padding: 0.8rem; border-radius: 10px;">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Assignment Type <span class="required">*</span></label>
+                        <select name="assignment_type" required style="padding: 0.8rem; border-radius: 10px;">
+                            <option value="self">Self-Assign (Assign to me)</option>
+                            <option value="normal">Normal Task (Unassigned/Pool)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Description</label>
+                        <textarea name="description" placeholder="Provide task details..." style="padding: 0.8rem; border-radius: 10px; min-height: 100px;"></textarea>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+                        <div class="form-group">
+                            <label>Priority <span class="required">*</span></label>
+                            <select name="priority" required style="padding: 0.8rem; border-radius: 10px;">
+                                <option value="low">Low</option>
+                                <option value="medium" selected>Medium</option>
+                                <option value="high">High</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Due Date <span class="required">*</span></label>
+                            <input type="datetime-local" name="due_date" required style="padding: 0.8rem; border-radius: 10px;">
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 2rem; display: flex; justify-content: flex-end; gap: 1rem;">
+                        <button type="button" class="btn btn-secondary" onclick="closeModal()" style="padding: 0.8rem 1.5rem; border-radius: 12px;">Cancel</button>
+                        <button type="submit" class="btn btn-primary" style="padding: 0.8rem 1.5rem; border-radius: 12px; background: #2563eb;">Create Task</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
 
 </body>
 </html>
 <?php
 $conn->close();
 ?>
-
-<!-- volunteer add -->
- 
