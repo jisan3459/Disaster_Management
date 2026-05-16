@@ -1362,27 +1362,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <tr style="border-bottom: 1px solid #f1f5f9;">
-                                        <td style="padding: 1rem;">May 04, 2026</td>
-                                        <td style="padding: 1rem; font-weight: 500;">Food Packets</td>
-                                        <td style="padding: 1rem;">25 units</td>
-                                        <td style="padding: 1rem;">Section A</td>
-                                        <td style="padding: 1rem;"><span style="background: #dcfce7; color: #15803d; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.85rem;">Delivered</span></td>
-                                    </tr>
-                                    <tr style="border-bottom: 1px solid #f1f5f9;">
-                                        <td style="padding: 1rem;">May 03, 2026</td>
-                                        <td style="padding: 1rem; font-weight: 500;">Water Bottles</td>
-                                        <td style="padding: 1rem;">100 units</td>
-                                        <td style="padding: 1rem;">Section B</td>
-                                        <td style="padding: 1rem;"><span style="background: #dcfce7; color: #15803d; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.85rem;">Delivered</span></td>
-                                    </tr>
-                                    <tr style="border-bottom: 1px solid #f1f5f9;">
-                                        <td style="padding: 1rem;">May 02, 2026</td>
-                                        <td style="padding: 1rem; font-weight: 500;">Medical Kits</td>
-                                        <td style="padding: 1rem;">10 units</td>
-                                        <td style="padding: 1rem;">Medical Tent</td>
-                                        <td style="padding: 1rem;"><span style="background: #dcfce7; color: #15803d; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.85rem;">Delivered</span></td>
-                                    </tr>
+                                    <?php
+                                    $supplies_query = $conn->query("SELECT tasks.*, camps.camp_name 
+                                        FROM tasks 
+                                        LEFT JOIN camps ON tasks.camp_id = camps.id 
+                                        WHERE tasks.assigned_to = $user_id AND tasks.status = 'completed'
+                                        ORDER BY tasks.completed_date DESC");
+                                    
+                                    if ($supplies_query->num_rows === 0):
+                                    ?>
+                                        <tr>
+                                            <td colspan="5" style="padding: 3rem; text-align: center; color: #94a3b8;">No supplies delivered yet.</td>
+                                        </tr>
+                                    <?php else: ?>
+                                        <?php while ($supply = $supplies_query->fetch_assoc()): ?>
+                                            <tr style="border-bottom: 1px solid #f1f5f9;">
+                                                <td style="padding: 1rem;"><?php echo date('M d, Y', strtotime($supply['completed_date'] ?: $supply['created_at'])); ?></td>
+                                                <td style="padding: 1rem; font-weight: 500;"><?php echo htmlspecialchars($supply['task_name']); ?></td>
+                                                <td style="padding: 1rem;">
+                                                    <?php 
+                                                    // Try to extract quantity from description or just show description
+                                                    $desc = $supply['description'];
+                                                    if (preg_match('/(\d+\s*(units|packets|bottles|kits|kg|items|families))/i', $desc, $matches)) {
+                                                        echo htmlspecialchars($matches[0]);
+                                                    } else {
+                                                        echo htmlspecialchars(substr($desc, 0, 30)) . (strlen($desc) > 30 ? '...' : '');
+                                                    }
+                                                    ?>
+                                                </td>
+                                                <td style="padding: 1rem;"><?php echo htmlspecialchars($supply['camp_name'] ?: 'N/A'); ?></td>
+                                                <td style="padding: 1rem;"><span style="background: #dcfce7; color: #15803d; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.85rem;">Delivered</span></td>
+                                            </tr>
+                                        <?php endwhile; ?>
+                                    <?php endif; ?>
                                 </tbody>
                             </table>
                         </div>
