@@ -1136,6 +1136,236 @@ function formatCurrency($amount) {
                         }
                     </script>
 
+                <?php elseif ($page === 'campaigns'): ?>
+                    <!-- Load Font Awesome CDN for icons -->
+                    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+                    
+                    <style>
+                        .campaigns-grid {
+                            display: grid;
+                            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+                            gap: 1.75rem;
+                            margin-top: 1.5rem;
+                        }
+                        .campaign-card {
+                            background: #ffffff;
+                            border: 1px solid #e2e8f0;
+                            border-radius: 20px;
+                            padding: 1.75rem;
+                            display: flex;
+                            flex-direction: column;
+                            justify-content: space-between;
+                            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px -1px rgba(0, 0, 0, 0.01);
+                            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+                            position: relative;
+                            overflow: hidden;
+                            min-height: 380px;
+                        }
+                        .campaign-card:hover {
+                            transform: translateY(-4px);
+                            box-shadow: 0 12px 20px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.02);
+                            border-color: #cbd5e1;
+                        }
+                        .campaign-title {
+                            font-size: 1.25rem;
+                            font-weight: 700;
+                            color: #0f172a;
+                            margin-bottom: 0.75rem;
+                            line-height: 1.4;
+                            padding-right: 2.5rem;
+                        }
+                        .campaign-desc {
+                            font-size: 0.88rem;
+                            color: #64748b;
+                            margin-bottom: 1.5rem;
+                            line-height: 1.6;
+                            flex-grow: 1;
+                        }
+                        .campaign-stats-row {
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: flex-end;
+                            margin-bottom: 0.5rem;
+                        }
+                        .campaign-stat-label {
+                            font-size: 0.8rem;
+                            color: #64748b;
+                            font-weight: 600;
+                            text-transform: uppercase;
+                            letter-spacing: 0.02em;
+                        }
+                        .campaign-stat-value {
+                            font-size: 0.95rem;
+                            font-weight: 700;
+                            color: #0f172a;
+                        }
+                        .campaign-progress-track {
+                            height: 8px;
+                            background: #f1f5f9;
+                            border-radius: 999px;
+                            margin-bottom: 0.6rem;
+                            overflow: hidden;
+                        }
+                        .campaign-progress-fill {
+                            height: 100%;
+                            background: #0f172a;
+                            border-radius: 999px;
+                            transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+                        }
+                        .campaign-meta-row {
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                            font-size: 0.82rem;
+                            color: #64748b;
+                            font-weight: 600;
+                            margin-bottom: 0.75rem;
+                        }
+                        .campaign-donors-row {
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                            font-size: 0.82rem;
+                            color: #4b5563;
+                            font-weight: 500;
+                            margin-bottom: 1.5rem;
+                            border-top: 1px solid #f1f5f9;
+                            padding-top: 0.75rem;
+                        }
+                        .campaign-btn {
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            gap: 0.5rem;
+                            width: 100%;
+                            background: #0f172a;
+                            color: #ffffff;
+                            border: none;
+                            border-radius: 14px;
+                            padding: 0.95rem 1rem;
+                            font-weight: 700;
+                            font-size: 0.9rem;
+                            cursor: pointer;
+                            transition: all 0.2s;
+                            text-decoration: none;
+                            box-sizing: border-box;
+                        }
+                        .campaign-btn:hover {
+                            background: #1e293b;
+                            transform: translateY(-1px);
+                            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
+                        }
+                        .campaign-btn:active {
+                            transform: translateY(0);
+                        }
+                        .campaign-badge {
+                            position: absolute;
+                            top: 1.25rem;
+                            right: 1.25rem;
+                            font-size: 0.7rem;
+                            font-weight: 700;
+                            text-transform: uppercase;
+                            padding: 0.25rem 0.65rem;
+                            border-radius: 999px;
+                            letter-spacing: 0.05em;
+                        }
+                        .badge-urgent {
+                            background: #fef2f2;
+                            color: #ef4444;
+                            border: 1px solid #fee2e2;
+                        }
+                        .badge-high {
+                            background: #fff7ed;
+                            color: #f97316;
+                            border: 1px solid #ffedd5;
+                        }
+                        .badge-medium {
+                            background: #f0fdf4;
+                            color: #22c55e;
+                            border: 1px solid #dcfce7;
+                        }
+                        .badge-low {
+                            background: #f8fafc;
+                            color: #64748b;
+                            border: 1px solid #e2e8f0;
+                        }
+                    </style>
+
+                    <div style="margin-bottom: 2rem;">
+                        <h2 style="font-size: 1.75rem; font-weight: 800; color: #0f172a; margin-bottom: 0.25rem;">Active Campaigns</h2>
+                        <p style="color: #64748b; font-size: 0.95rem; font-weight: 500;">Support ongoing relief campaigns</p>
+                    </div>
+
+                    <div class="campaigns-grid">
+                        <?php 
+                        $active_camps_result = $conn->query("SELECT * FROM campaigns WHERE status = 'active' ORDER BY urgency = 'urgent' DESC, (raised_amount / goal_amount) DESC");
+                        if ($active_camps_result && $active_camps_result->num_rows > 0):
+                            while ($campaign = $active_camps_result->fetch_assoc()):
+                                $progress = $campaign['goal_amount'] > 0 ? min(100, round(($campaign['raised_amount'] / $campaign['goal_amount']) * 100)) : 0;
+                                
+                                // Fetch unique donor count for this campaign
+                                $camp_id = $campaign['id'];
+                                $donor_count_q = $conn->query("SELECT COUNT(DISTINCT donor_id) as donor_count FROM donations WHERE campaign_id = $camp_id AND status = 'completed'");
+                                $donor_count_res = $donor_count_q ? $donor_count_q->fetch_assoc() : null;
+                                $donor_count = $donor_count_res ? ($donor_count_res['donor_count'] ?? 0) : 0;
+                                
+                                // Determine urgency badge
+                                $urgency = strtolower($campaign['urgency'] ?? 'medium');
+                                $badge_class = 'badge-medium';
+                                if ($urgency === 'urgent') $badge_class = 'badge-urgent';
+                                elseif ($urgency === 'high') $badge_class = 'badge-high';
+                                elseif ($urgency === 'low') $badge_class = 'badge-low';
+                                
+                                // Format end date
+                                $end_date_str = 'Ongoing';
+                                if (!empty($campaign['end_date'])) {
+                                    $end_date_str = 'Ends ' . date('Y-m-d', strtotime($campaign['end_date']));
+                                }
+                        ?>
+                                <div class="campaign-card">
+                                    <span class="campaign-badge <?php echo $badge_class; ?>"><?php echo htmlspecialchars(ucfirst($urgency)); ?></span>
+                                    
+                                    <div style="flex-grow: 1; display: flex; flex-direction: column;">
+                                        <h3 class="campaign-title"><?php echo htmlspecialchars($campaign['campaign_name']); ?></h3>
+                                        <p class="campaign-desc"><?php echo htmlspecialchars($campaign['description'] ?: 'Help support our camp with resources, supplies, and monetary donations to aid recovery efforts.'); ?></p>
+                                    </div>
+                                    
+                                    <div>
+                                        <div class="campaign-stats-row">
+                                            <span class="campaign-stat-label">Raised</span>
+                                            <span class="campaign-stat-value"><strong><?php echo formatCurrency($campaign['raised_amount']); ?></strong> <span style="color: #64748b; font-weight: 500; font-size: 0.82rem;">of <?php echo formatCurrency($campaign['goal_amount']); ?></span></span>
+                                        </div>
+                                        
+                                        <div class="campaign-progress-track">
+                                            <div class="campaign-progress-fill" style="width: <?php echo $progress; ?>%;"></div>
+                                        </div>
+                                        
+                                        <div class="campaign-meta-row">
+                                            <span><?php echo $progress; ?>% funded</span>
+                                        </div>
+                                        
+                                        <div class="campaign-donors-row">
+                                            <span><i class="fa-solid fa-users" style="margin-right: 0.35rem; color: #64748b;"></i><?php echo $donor_count; ?> <?php echo $donor_count === 1 ? 'donor' : 'donors'; ?></span>
+                                            <span><i class="fa-regular fa-clock" style="margin-right: 0.35rem; color: #64748b;"></i><?php echo htmlspecialchars($end_date_str); ?></span>
+                                        </div>
+                                        
+                                        <a href="donor_dashboard.php?page=donate&campaign_id=<?php echo $campaign['id']; ?>" class="campaign-btn">
+                                            <i class="fa-regular fa-heart"></i> Donate to Campaign
+                                        </a>
+                                    </div>
+                                </div>
+                        <?php 
+                            endwhile; 
+                        else:
+                        ?>
+                            <div style="grid-column: 1 / -1; text-align: center; padding: 3rem; background: #ffffff; border-radius: 20px; border: 1px solid #e5e7eb;">
+                                <span style="font-size: 2.5rem;">📣</span>
+                                <h3 style="margin-top: 1rem; color: #1f2937;">No Active Campaigns</h3>
+                                <p style="color: #6b7280; margin-top: 0.25rem;">Check back later for new relief missions.</p>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+
                 <?php elseif ($page === 'history'): ?>
                     <!-- Load Font Awesome for history icons if not loaded -->
                     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
