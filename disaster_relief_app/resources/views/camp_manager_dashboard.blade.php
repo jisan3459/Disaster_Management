@@ -1,18 +1,18 @@
 <?php
-include 'config.php';
+include base_path('../config.php');
 
 if (!isLoggedIn()) {
-    redirect('signin.php');
+    php_redirect('/signin');
 }
 
 $user_role = $_SESSION['role'] ?? '';
 if ($user_role !== 'camp_manager') {
     if ($user_role === 'admin') {
-        redirect('admin_dashboard.php');
+        php_redirect('/admin_dashboard');
     } elseif ($user_role === 'volunteer') {
-        redirect('volunteer_dashboard.php');
+        php_redirect('/volunteer_dashboard');
     }
-    redirect('index.php');
+    php_redirect('/index');
 }
 
 $user_id = $_SESSION['user_id'];
@@ -455,7 +455,7 @@ $field_reports = []; while($row = $field_reports_res->fetch_assoc()) { $field_re
                 <a href="?page=settings" class="menu-link <?php echo $page === 'settings' ? 'active' : ''; ?>"><i data-lucide="settings"></i> <span>Settings</span></a>
             </nav>
             <div class="sidebar-footer">
-                <div style="display: flex; align-items: center; gap: 10px; padding: 10px; background: #f8fafc; border-radius: 12px; cursor: pointer;" onclick="location.href='logout.php'">
+                <div style="display: flex; align-items: center; gap: 10px; padding: 10px; background: #f8fafc; border-radius: 12px; cursor: pointer;" onclick="location.href='/logout'">
                     <div style="width: 32px; height: 32px; border-radius: 8px; background: var(--primary); color: white; display: grid; place-items: center; font-weight: 700;"><?php echo strtoupper(substr($user['full_name'], 0, 1)); ?></div>
                     <div style="flex: 1; overflow: hidden;"><p style="font-size: 0.8rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"><?php echo htmlspecialchars($user['full_name']); ?></p></div>
                     <i data-lucide="log-out" style="width: 14px; color: var(--danger);"></i>
@@ -1332,7 +1332,7 @@ $field_reports = []; while($row = $field_reports_res->fetch_assoc()) { $field_re
         // Real-time updates for Camp Manager
         let lastUpdateCheck = '<?php echo date('Y-m-d H:i:s'); ?>';
         setInterval(() => {
-            fetch(`camp_manager_dashboard.php?api=check_updates&last_check=${encodeURIComponent(lastUpdateCheck)}`)
+            fetch(`/camp_manager_dashboard?api=check_updates&last_check=${encodeURIComponent(lastUpdateCheck)}`)
                 .then(res => res.json())
                 .then(data => {
                     if (data.new_tasks > 0 || data.new_volunteers > 0 || data.new_distributions > 0) {
