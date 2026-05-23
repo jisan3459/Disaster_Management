@@ -62,15 +62,25 @@ $camp_id = $camp['id'];
 $camp_name = $camp['camp_name'];
 $camp_location = $camp['location'];
 
-// Ensure distributions table exists
+// Ensure distributions table exists with extended fields
 $conn->query("CREATE TABLE IF NOT EXISTS distributions (
     id INT PRIMARY KEY AUTO_INCREMENT,
     camp_id INT,
     recipient_name VARCHAR(255) NOT NULL,
     items TEXT NOT NULL,
+    quantity FLOAT DEFAULT 1.0,
+    distributed_by INT,
     distributed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (camp_id) REFERENCES camps(id)
+    FOREIGN KEY (camp_id) REFERENCES camps(id),
+    FOREIGN KEY (distributed_by) REFERENCES users(id)
 )");
+
+// Migration for existing table
+$d_cols = $conn->query("SHOW COLUMNS FROM distributions");
+$existing_d_cols = [];
+while($row = $d_cols->fetch_assoc()) { $existing_d_cols[] = $row['Field']; }
+if (!in_array('quantity', $existing_d_cols)) { $conn->query("ALTER TABLE distributions ADD COLUMN quantity FLOAT DEFAULT 1.0 AFTER items"); }
+if (!in_array('distributed_by', $existing_d_cols)) { $conn->query("ALTER TABLE distributions ADD COLUMN distributed_by INT AFTER quantity"); }
 
 // Handle Actions
 $success_msg = '';
@@ -97,10 +107,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $task_name = sanitize($_POST['task_name']);
             $vol_id = intval($_POST['volunteer_id']);
             $priority = sanitize($_POST['priority']);
+            $type = sanitize($_POST['task_type'] ?? 'standard');
+            $item = sanitize($_POST['distribution_item'] ?? '');
+            $qty = floatval($_POST['distribution_qty'] ?? 0);
+            $due_date = sanitize($_POST['due_date'] ?? '');
             
-            $insert = $conn->query("INSERT INTO tasks (task_name, camp_id, assigned_to, assigned_by, priority, status) VALUES ('$task_name', $camp_id, $vol_id, $user_id, '$priority', 'pending')");
-            if ($insert) { $success_msg = "Task assigned successfully."; } 
-            else { $error_msg = "Failed to assign task."; }
+            $insert = $conn->query("INSERT INTO tasks (task_name, camp_id, assigned_to, assigned_by, priority, task_type, distribution_item, distribution_qty, status, due_date) VALUES ('$task_name', $camp_id, $vol_id, $user_id, '$priority', '$type', '$item', $qty, 'pending', '$due_date')");
+
+            if ($insert) { 
+                $success_msg = "Task assigned successfully.";
+                $conn->query("INSERT INTO notifications (user_id, notification_type, title, message) VALUES ($vol_id, 'task', 'New Task Assigned', 'You have a new task: $task_name')");
+            } 
+            else { $error_msg = "Failed to assign task: " . $conn->error; }
         }
 
         if ($action === 'approve_affected') {
@@ -137,11 +155,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $task_name = sanitize($_POST['task_name']);
             $priority = sanitize($_POST['priority']);
             $desc = sanitize($_POST['description']);
+            $type = sanitize($_POST['task_type'] ?? 'standard');
+            $item = sanitize($_POST['distribution_item'] ?? '');
+            $qty = floatval($_POST['distribution_qty'] ?? 0);
+            $due_date = sanitize($_POST['due_date'] ?? '');
 
             $conn->query("UPDATE affected_help_requests SET status = 'assigned' WHERE id = $req_id");
-            $insert = $conn->query("INSERT INTO tasks (task_name, description, camp_id, assigned_to, assigned_by, priority, status) VALUES ('$task_name', '$desc', $camp_id, $vol_id, $user_id, '$priority', 'pending')");
+            $insert = $conn->query("INSERT INTO tasks (task_name, description, camp_id, assigned_to, assigned_by, priority, task_type, distribution_item, distribution_qty, status, due_date) VALUES ('$task_name', '$desc', $camp_id, $vol_id, $user_id, '$priority', '$type', '$item', $qty, 'pending', '$due_date')");
+
             
-            if ($insert) { $success_msg = "Task created and assigned to volunteer."; }
+            if ($insert) { 
+                $success_msg = "Task created and assigned to volunteer.";
+                $conn->query("INSERT INTO notifications (user_id, notification_type, title, message) VALUES ($vol_id, 'task', 'New Aid Request Task', 'You have been assigned a distribution task: $task_name')");
+            }
             else { $error_msg = "Failed to create task."; }
         }
 
@@ -160,7 +186,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $success_msg = "Volunteer added and assigned to camp.";
             } else { $error_msg = "Failed to add volunteer: " . $conn->error; }
         }
+
+        if ($action === 'assign_volunteer_to_camp') {
+            $vol_id = intval($_POST['volunteer_id']);
+            $check = $conn->query("SELECT * FROM volunteer_assignments WHERE volunteer_id = $vol_id AND status = 'active'");
+            if ($check->num_rows == 0) {
+                $insert = $conn->query("INSERT INTO volunteer_assignments (volunteer_id, camp_id, status) VALUES ($vol_id, $camp_id, 'active')");
+                if ($insert) { 
+                    $success_msg = "Volunteer assigned to camp successfully.";
+                    $conn->query("INSERT INTO notifications (user_id, notification_type, title, message) VALUES ($vol_id, 'system', 'Camp Assignment', 'You have been assigned to " . ($camp['camp_name'] ?? 'a new camp') . "')");
+                }
+                else { $error_msg = "Failed to assign volunteer."; }
+            } else {
+                $error_msg = "Volunteer is already assigned to a camp.";
+            }
+        }
+        if ($action === 'record_distribution') {
+            $recipient = sanitize($_POST['recipient_name']);
+            $items = sanitize($_POST['items']);
+            $qty = floatval($_POST['quantity']);
+            $dist_by = intval($_POST['distributed_by']);
+            
+            $insert = $conn->query("INSERT INTO distributions (camp_id, recipient_name, items, quantity, distributed_by) VALUES ($camp_id, '$recipient', '$items', $qty, $dist_by)");
+            if ($insert) { $success_msg = "Distribution recorded successfully."; }
+            else { $error_msg = "Failed to record distribution: " . $conn->error; }
+        }
     }
+}
+
+// API Endpoint for Camp Manager Updates
+if (isset($_GET['api']) && $_GET['api'] === 'check_updates') {
+    header('Content-Type: application/json');
+    $last_check = $_GET['last_check'] ?? date('Y-m-d H:i:s');
+    
+    $new_tasks = $conn->query("SELECT COUNT(*) FROM tasks WHERE camp_id = $camp_id AND updated_at > '$last_check'")->fetch_row()[0];
+    $new_volunteers = $conn->query("SELECT COUNT(*) FROM users u JOIN volunteer_assignments va ON u.id = va.volunteer_id WHERE va.camp_id = $camp_id AND (va.created_at > '$last_check' OR u.last_login > '$last_check')")->fetch_row()[0];
+    $new_distributions = $conn->query("SELECT COUNT(*) FROM distributions WHERE camp_id = $camp_id AND distributed_at > '$last_check'")->fetch_row()[0];
+    
+    echo json_encode([
+        'new_tasks' => intval($new_tasks),
+        'new_volunteers' => intval($new_volunteers),
+        'new_distributions' => intval($new_distributions),
+        'timestamp' => date('Y-m-d H:i:s')
+    ]);
+    exit();
 }
 
 $page = isset($_GET['page']) ? $_GET['page'] : 'dashboard';
@@ -192,16 +261,40 @@ $pending_affected = []; while($row = $pending_affected_res->fetch_assoc()) { $pe
 $inventory_res = $conn->query("SELECT * FROM inventory WHERE camp_id = $camp_id ORDER BY item_name ASC");
 $inventory = []; while($row = $inventory_res->fetch_assoc()) { $inventory[] = $row; }
 
-$volunteers_res = $conn->query("SELECT u.* FROM users u JOIN volunteer_assignments va ON u.id = va.volunteer_id WHERE va.camp_id = $camp_id AND va.status = 'active'");
-$volunteers = []; while($row = $volunteers_res->fetch_assoc()) { $volunteers[] = $row; }
+// Fetch Volunteers for Management
+// Assigned Volunteers to this camp
+$assigned_vols_res = $conn->query("SELECT u.* FROM users u JOIN volunteer_assignments va ON u.id = va.volunteer_id WHERE va.camp_id = $camp_id AND va.status = 'active'");
+$assigned_volunteers = []; while($row = $assigned_vols_res->fetch_assoc()) { $assigned_volunteers[] = $row; }
+
+// Unassigned Volunteers (Not assigned to ANY camp currently)
+$unassigned_vols_res = $conn->query("SELECT * FROM users WHERE role = 'volunteer' AND id NOT IN (SELECT volunteer_id FROM volunteer_assignments WHERE status = 'active')");
+$unassigned_volunteers = []; while($row = $unassigned_vols_res->fetch_assoc()) { $unassigned_volunteers[] = $row; }
+
+// For backward compatibility and dropdowns
+$volunteers = array_merge($assigned_volunteers, $unassigned_volunteers);
 
 $tasks_res = $conn->query("SELECT t.*, u.full_name as assigned_name FROM tasks t LEFT JOIN users u ON t.assigned_to = u.id WHERE t.camp_id = $camp_id ORDER BY t.created_at DESC");
 $tasks = []; while($row = $tasks_res->fetch_assoc()) { $tasks[] = $row; }
 
 $help_requests_res = $conn->query("SELECT ahr.*, ap.full_name as requester_name FROM affected_help_requests ahr JOIN affected_persons ap ON ahr.affected_id = ap.id WHERE ap.camp_id = $camp_id AND ahr.status = 'pending' ORDER BY ahr.created_at ASC");
-$help_requests = []; while($row = $help_requests_res->fetch_assoc()) { $help_requests[] = $row; }
+$help_requests = []; if($help_requests_res) while($row = $help_requests_res->fetch_assoc()) { $help_requests[] = $row; }
+
+// Distribution Specific Data
+$all_distributions_res = $conn->query("SELECT d.*, u.full_name as distributor_name FROM distributions d LEFT JOIN users u ON d.distributed_by = u.id WHERE d.camp_id = $camp_id ORDER BY d.distributed_at DESC");
+$all_distributions = []; while($row = $all_distributions_res->fetch_assoc()) { $all_distributions[] = $row; }
+
+$dist_stats = [
+    'total' => count($all_distributions),
+    'this_week' => $conn->query("SELECT COUNT(*) FROM distributions WHERE camp_id = $camp_id AND distributed_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)")->fetch_row()[0],
+    'today' => $conn->query("SELECT COUNT(*) FROM distributions WHERE camp_id = $camp_id AND DATE(distributed_at) = CURDATE()")->fetch_row()[0]
+];
+
+// Fetch Field Reports from Volunteers
+$field_reports_res = $conn->query("SELECT er.*, u.full_name as volunteer_name FROM emergency_reports er JOIN users u ON er.reported_by = u.id WHERE er.camp_id = $camp_id ORDER BY er.created_at DESC");
+$field_reports = []; while($row = $field_reports_res->fetch_assoc()) { $field_reports[] = $row; }
 
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -317,7 +410,8 @@ $help_requests = []; while($row = $help_requests_res->fetch_assoc()) { $help_req
         
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; backdrop-filter: blur(4px); }
         .modal.show { display: flex; }
-        .modal-content { background: white; padding: 2rem; border-radius: var(--radius-lg); width: 100%; max-width: 500px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); }
+        .modal-content { background: white; padding: 1.8rem; border-radius: var(--radius-lg); width: 90%; max-width: 480px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); }
+
 
         /* Supplies Specific Styles */
         .supplies-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
@@ -382,6 +476,8 @@ $help_requests = []; while($row = $help_requests_res->fetch_assoc()) { $help_req
                         <button class="btn btn-primary" style="background: #0f172a;" onclick="toggleModal('registerModal')"><i data-lucide="plus" style="width:18px;"></i> Register Manually</button>
                     <?php elseif ($page === 'volunteers'): ?>
                         <button class="btn btn-primary" style="background: #0f172a;" onclick="toggleModal('addVolunteerModal')"><i data-lucide="user-plus" style="width:18px;"></i> Add Volunteer</button>
+                    <?php elseif ($page === 'distribution'): ?>
+                        <button class="btn btn-primary" style="background: #0f172a;" onclick="toggleModal('recordDistModal')"><i data-lucide="plus" style="width:18px;"></i> Record Distribution</button>
                     <?php else: ?>
                         <button class="btn btn-outline" onclick="location.reload()"><i data-lucide="refresh-cw" style="width:18px;"></i></button>
                         <button class="btn btn-primary" onclick="location.href='?page=report'"><i data-lucide="file-text" style="width:18px;"></i> Report</button>
@@ -712,47 +808,92 @@ $help_requests = []; while($row = $help_requests_res->fetch_assoc()) { $help_req
                     </div>
 
                 <?php elseif ($page === 'volunteers'): ?>
-                    <div class="ap-table-panel">
-                        <div class="ap-table-header">Active Volunteers</div>
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>Email</th>
-                                        <th>Phone</th>
-                                        <th>Skills</th>
-                                        <th>Availability</th>
-                                        <th>Assigned Tasks</th>
-                                        <th>Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($volunteers as $vol): 
-                                        $v_id = $vol['id'];
-                                        $t_count = $conn->query("SELECT COUNT(*) FROM tasks WHERE assigned_to = $v_id AND status != 'completed'")->fetch_row()[0];
-                                        $skills_arr = explode(',', $vol['skills'] ?? '');
-                                    ?>
+                    <div style="display: grid; gap: 2rem;">
+                        <!-- Assigned Volunteers -->
+                        <div class="ap-table-panel">
+                            <div class="ap-table-header" style="background: #eff6ff; color: #1e40af; border-bottom: 1px solid #dbeafe;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                                    <span>Team Members (Assigned to this Camp)</span>
+                                    <span style="font-size: 0.75rem; background: #1e40af; color: white; padding: 2px 8px; border-radius: 999px;"><?php echo count($assigned_volunteers); ?></span>
+                                </div>
+                            </div>
+                            <div class="table-container">
+                                <table>
+                                    <thead>
                                         <tr>
-                                            <td><span style="font-weight: 700;"><?php echo htmlspecialchars($vol['full_name']); ?></span></td>
-                                            <td style="color: var(--text-muted); font-size: 0.85rem;"><?php echo htmlspecialchars($vol['email']); ?></td>
-                                            <td style="color: var(--text-muted); font-size: 0.85rem;"><?php echo htmlspecialchars($vol['phone'] ?? 'N/A'); ?></td>
-                                            <td>
-                                                <?php foreach($skills_arr as $s): if(trim($s)): ?>
-                                                    <span class="skill-badge"><?php echo htmlspecialchars(trim($s)); ?></span>
-                                                <?php endif; endforeach; ?>
-                                            </td>
-                                            <td style="font-size: 0.85rem; font-weight: 500;"><?php echo htmlspecialchars($vol['availability'] ?? 'Full-time'); ?></td>
-                                            <td><span class="task-pill"><?php echo $t_count; ?> tasks</span></td>
-                                            <td>
-                                                <button class="btn btn-outline btn-sm" style="color: #4f46e5; border-color: #e0e7ff; gap: 4px;" onclick="location.href='?page=tasks&vol=<?php echo $v_id; ?>'">
-                                                    <i data-lucide="clipboard-list" style="width:14px;"></i> Assign Task
-                                                </button>
-                                            </td>
+                                            <th>Name</th>
+                                            <th>Email</th>
+                                            <th>Assigned Tasks</th>
+                                            <th>Last Active</th>
+                                            <th>Action</th>
                                         </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody>
+                                        <?php if (empty($assigned_volunteers)): ?>
+                                            <tr><td colspan="5" style="text-align:center; padding: 2rem; color: var(--text-muted);">No volunteers assigned to this camp.</td></tr>
+                                        <?php else: ?>
+                                            <?php foreach ($assigned_volunteers as $vol): 
+                                                $v_id = $vol['id'];
+                                                $t_count = $conn->query("SELECT COUNT(*) FROM tasks WHERE assigned_to = $v_id AND status != 'completed'")->fetch_row()[0];
+                                            ?>
+                                                <tr>
+                                                    <td><span style="font-weight: 700;"><?php echo htmlspecialchars($vol['full_name']); ?></span></td>
+                                                    <td style="color: var(--text-muted); font-size: 0.85rem;"><?php echo htmlspecialchars($vol['email']); ?></td>
+                                                    <td><span class="task-pill"><?php echo $t_count; ?> active tasks</span></td>
+                                                    <td style="font-size: 0.85rem; color: var(--text-muted);"><?php echo $vol['last_login'] ? date('M j, H:i', strtotime($vol['last_login'])) : 'Never'; ?></td>
+                                                    <td>
+                                                        <button class="btn btn-outline btn-sm" onclick="location.href='?page=tasks&vol=<?php echo $v_id; ?>'">Manage Tasks</button>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Unassigned Volunteers -->
+                        <div class="ap-table-panel">
+                            <div class="ap-table-header" style="background: #f8fafc; color: #475569; border-bottom: 1px solid #e2e8f0;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                                    <span>Available Volunteers (Unassigned)</span>
+                                    <span style="font-size: 0.75rem; background: #64748b; color: white; padding: 2px 8px; border-radius: 999px;"><?php echo count($unassigned_volunteers); ?></span>
+                                </div>
+                            </div>
+                            <div class="table-container">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Email</th>
+                                            <th>Location</th>
+                                            <th>Joined</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php if (empty($unassigned_volunteers)): ?>
+                                            <tr><td colspan="5" style="text-align:center; padding: 2rem; color: var(--text-muted);">No unassigned volunteers found.</td></tr>
+                                        <?php else: ?>
+                                            <?php foreach ($unassigned_volunteers as $vol): ?>
+                                                <tr>
+                                                    <td><span style="font-weight: 700;"><?php echo htmlspecialchars($vol['full_name']); ?></span></td>
+                                                    <td style="color: var(--text-muted); font-size: 0.85rem;"><?php echo htmlspecialchars($vol['email']); ?></td>
+                                                    <td style="font-size: 0.85rem;"><?php echo htmlspecialchars($vol['location'] ?? 'Not set'); ?></td>
+                                                    <td style="font-size: 0.85rem; color: var(--text-muted);"><?php echo date('M j, Y', strtotime($vol['created_at'])); ?></td>
+                                                    <td>
+                                                        <form method="POST" style="margin: 0;">
+                                                            <input type="hidden" name="action" value="assign_volunteer_to_camp">
+                                                            <input type="hidden" name="volunteer_id" value="<?php echo $vol['id']; ?>">
+                                                            <button type="submit" class="btn btn-primary btn-sm" style="background: #4f46e5;">Assign to Camp</button>
+                                                        </form>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
 
@@ -892,6 +1033,32 @@ $help_requests = []; while($row = $help_requests_res->fetch_assoc()) { $help_req
                                     </select>
                                 </div>
                                 <div class="form-group">
+                                    <label>Task Type</label>
+                                    <select name="task_type" id="assign_task_type" class="form-control" onchange="toggleDistFields('assign')">
+                                        <option value="standard">Standard Task</option>
+                                        <option value="distribution">Aid Distribution</option>
+                                    </select>
+                                </div>
+                                <div id="assign_dist_fields" style="display:none; background: #f8fafc; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid var(--border);">
+                                    <div class="form-group">
+                                        <label>Distribution Item</label>
+                                        <select name="distribution_item" id="assign_dist_item" class="form-control">
+                                            <option value="">-- Select Item --</option>
+                                            <?php foreach ($inventory as $inv): ?>
+                                                <option value="<?php echo htmlspecialchars($inv['item_name']); ?>"><?php echo htmlspecialchars($inv['item_name']); ?> (<?php echo $inv['quantity']; ?> <?php echo $inv['unit']; ?>)</option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Quantity</label>
+                                        <input type="number" name="distribution_qty" id="assign_dist_qty" class="form-control" value="1" min="1">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Due Date</label>
+                                    <input type="datetime-local" name="due_date" id="assign_due_date" class="form-control" required>
+                                </div>
+                                <div class="form-group">
                                     <label>Instructions for Volunteer</label>
                                     <textarea name="description" id="assign_desc" class="form-control" style="min-height: 100px;"></textarea>
                                 </div>
@@ -918,8 +1085,35 @@ $help_requests = []; while($row = $help_requests_res->fetch_assoc()) { $help_req
                                         <?php endforeach; ?>
                                     </select>
                                 </div>
+                                <div class="form-group">
+                                    <label>Task Type</label>
+                                    <select name="task_type" class="form-control" onchange="toggleDistFields('add')">
+                                        <option value="standard">Standard Task</option>
+                                        <option value="distribution">Aid Distribution</option>
+                                    </select>
+                                </div>
+                                <div id="add_dist_fields" style="display:none; background: #f8fafc; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid var(--border);">
+                                    <div class="form-group">
+                                        <label>Distribution Item</label>
+                                        <select name="distribution_item" class="form-control">
+                                            <option value="">-- Select Item --</option>
+                                            <?php foreach ($inventory as $inv): ?>
+                                                <option value="<?php echo htmlspecialchars($inv['item_name']); ?>"><?php echo htmlspecialchars($inv['item_name']); ?> (<?php echo $inv['quantity']; ?> <?php echo $inv['unit']; ?>)</option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Quantity</label>
+                                        <input type="number" name="distribution_qty" class="form-control" value="1" min="1">
+                                    </div>
+                                </div>
                                 <div class="form-group"><label>Priority</label><select name="priority" class="form-control"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
+                                <div class="form-group">
+                                    <label>Due Date</label>
+                                    <input type="datetime-local" name="due_date" class="form-control" required>
+                                </div>
                                 <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px; margin-top: 1rem;">Create Task</button>
+
                             </form>
                         </div>
                     </div>
@@ -930,21 +1124,185 @@ $help_requests = []; while($row = $help_requests_res->fetch_assoc()) { $help_req
                         document.getElementById('assign_task_name').value = "Aid Request: " + req.category;
                         document.getElementById('assign_desc').value = "Request from " + req.requester_name + ":\n" + req.description + "\n\nContact: " + (req.contact || 'N/A');
                         document.getElementById('assign_priority').value = req.urgency.toLowerCase();
+                        
+                        // Auto-fill distribution fields if it looks like one
+                        if (['Food', 'Medicine', 'Supplies'].includes(req.category)) {
+                            document.getElementById('assign_task_type').value = 'distribution';
+                            document.getElementById('assign_dist_item').value = req.category;
+                            document.getElementById('assign_dist_qty').value = 1;
+                            document.getElementById('assign_dist_fields').style.display = 'block';
+                        }
+                        
                         toggleModal('assignRequestModal');
                     }
+                    function toggleDistFields(prefix) {
+                        const modal = document.getElementById(prefix === 'assign' ? 'assignRequestModal' : 'addTaskModal');
+                        const type = modal.querySelector('select[name="task_type"]').value;
+                        const fields = document.getElementById(prefix + '_dist_fields');
+                        if (fields) {
+                            fields.style.display = (type === 'distribution') ? 'block' : 'none';
+                            const inputs = fields.querySelectorAll('select, input');
+                            inputs.forEach(input => input.required = (type === 'distribution'));
+                        }
+                    }
+
                     </script>
 
                 <?php elseif ($page === 'distribution'): ?>
-                    <div class="panel" style="padding: 4rem; text-align: center; border-style: dashed; background: transparent; opacity: 0.5;">
-                        <i data-lucide="truck" style="width: 48px; color: var(--text-muted); margin-bottom: 1rem;"></i>
-                        <h3>Aid Distribution</h3>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div style="text-align: center; width: 100%;">
+                                <i data-lucide="trending-up" style="color: #4f46e5; margin-bottom: 0.5rem;"></i>
+                                <p style="font-size: 1.75rem; font-weight: 800;"><?php echo $dist_stats['total']; ?></p>
+                                <p style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600;">Total Distributions</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div style="text-align: center; width: 100%;">
+                                <i data-lucide="trending-up" style="color: #10b981; margin-bottom: 0.5rem;"></i>
+                                <p style="font-size: 1.75rem; font-weight: 800;"><?php echo $dist_stats['this_week']; ?></p>
+                                <p style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600;">This Week</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div style="text-align: center; width: 100%;">
+                                <i data-lucide="trending-up" style="color: #8b5cf6; margin-bottom: 0.5rem;"></i>
+                                <p style="font-size: 1.75rem; font-weight: 800;"><?php echo $dist_stats['today']; ?></p>
+                                <p style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600;">Today</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ap-table-panel">
+                        <div class="ap-table-header">Distribution Logs</div>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Recipient</th>
+                                        <th>Items</th>
+                                        <th>Quantity</th>
+                                        <th>Distributed By</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php if (empty($all_distributions)): ?>
+                                        <tr><td colspan="5" style="text-align:center; padding: 3rem; color: var(--text-muted);">No distribution logs yet.</td></tr>
+                                    <?php else: ?>
+                                        <?php foreach ($all_distributions as $d): ?>
+                                            <tr>
+                                                <td style="color: var(--text-muted); font-weight: 500;"><?php echo date('Y-m-d', strtotime($d['distributed_at'])); ?></td>
+                                                <td><span style="font-weight: 700;"><?php echo htmlspecialchars($d['recipient_name']); ?></span></td>
+                                                <td><?php echo htmlspecialchars($d['items']); ?></td>
+                                                <td><?php echo $d['quantity']; ?></td>
+                                                <td><?php echo htmlspecialchars($d['distributor_name'] ?? 'System'); ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    <?php endif; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Record Distribution Modal -->
+                    <div id="recordDistModal" class="modal">
+                        <div class="modal-content">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                                <h3 style="font-size: 1.25rem; font-weight: 700;">Record New Distribution</h3>
+                                <button onclick="toggleModal('recordDistModal')" style="background: none; border: none; cursor: pointer; color: var(--text-muted);"><i data-lucide="x"></i></button>
+                            </div>
+                            <form method="POST">
+                                <input type="hidden" name="action" value="record_distribution">
+                                <div class="form-group">
+                                    <label>Recipient Name</label>
+                                    <input type="text" name="recipient_name" class="form-control" placeholder="e.g. Robert Martinez" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Items Distributed</label>
+                                    <input type="text" name="items" class="form-control" placeholder="e.g. Food packets, Water" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Quantity</label>
+                                    <input type="number" name="quantity" class="form-control" value="1" min="1" step="0.1" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Distributed By</label>
+                                    <select name="distributed_by" class="form-control" required>
+                                        <option value="<?php echo $user_id; ?>">Me (<?php echo htmlspecialchars($user['full_name']); ?>)</option>
+                                        <?php foreach ($volunteers as $v): ?>
+                                            <option value="<?php echo $v['id']; ?>"><?php echo htmlspecialchars($v['full_name']); ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px; background: #0f172a; margin-top: 1rem;">Log Distribution</button>
+                            </form>
+                        </div>
                     </div>
 
                 <?php elseif ($page === 'report'): ?>
-                    <div class="panel" style="padding: 4rem; text-align: center; border-style: dashed; background: transparent; opacity: 0.5;">
-                        <i data-lucide="file-text" style="width: 48px; color: var(--text-muted); margin-bottom: 1rem;"></i>
-                        <h3>Reports</h3>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                        <h2 style="font-size: 1.5rem; font-weight: 700;">Volunteer Field Reports</h2>
+                        <div style="display: flex; gap: 10px;">
+                            <span class="badge" style="background: #eff6ff; color: #1e40af;"><?php echo count($field_reports); ?> Total Reports</span>
+                        </div>
                     </div>
+
+                    <div class="ap-table-panel">
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Date & Time</th>
+                                        <th>Volunteer</th>
+                                        <th>Category</th>
+                                        <th>Priority</th>
+                                        <th>Description</th>
+                                        <th>Location</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php if (empty($field_reports)): ?>
+                                        <tr><td colspan="6" style="text-align:center; padding: 4rem; color: var(--text-muted);">
+                                            <div style="font-size: 2.5rem; margin-bottom: 1rem;">📋</div>
+                                            No field reports submitted yet.
+                                        </td></tr>
+                                    <?php else: ?>
+                                        <?php foreach ($field_reports as $fr): ?>
+                                            <tr>
+                                                <td style="font-size: 0.85rem; color: var(--text-muted);">
+                                                    <?php echo date('M d, Y', strtotime($fr['created_at'])); ?><br>
+                                                    <?php echo date('h:i A', strtotime($fr['created_at'])); ?>
+                                                </td>
+                                                <td><span style="font-weight: 700;"><?php echo htmlspecialchars($fr['volunteer_name']); ?></span></td>
+                                                <td>
+                                                    <span class="badge" style="background: <?php echo $fr['report_category'] === 'incident' ? '#fff7ed; color: #ea580c;' : '#f0fdf4; color: #16a34a;'; ?>">
+                                                        <?php echo ucfirst($fr['report_category']); ?>
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <span class="badge" style="background: <?php 
+                                                        echo $fr['priority'] === 'Critical' ? '#fef2f2; color: #dc2626;' : ($fr['priority'] === 'High' ? '#fff1f2; color: #e11d48;' : '#f8fafc; color: #64748b;'); 
+                                                    ?>">
+                                                        <?php echo htmlspecialchars($fr['priority']); ?>
+                                                    </span>
+                                                </td>
+                                                <td style="max-width: 300px;">
+                                                    <p style="font-weight: 600; font-size: 0.9rem; margin-bottom: 4px;"><?php echo htmlspecialchars($fr['issue_type']); ?></p>
+                                                    <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.4;"><?php echo htmlspecialchars($fr['description']); ?></p>
+                                                    <?php if(!empty($fr['immediate_action'])): ?>
+                                                        <p style="font-size: 0.75rem; color: #10b981; font-weight: 600; margin-top: 5px;">Action: <?php echo htmlspecialchars($fr['immediate_action']); ?></p>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td style="font-size: 0.85rem;"><?php echo htmlspecialchars($fr['location']); ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    <?php endif; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
 
                 <?php elseif ($page === 'messages'): ?>
                     <div class="panel" style="padding: 4rem; text-align: center; border-style: dashed; background: transparent; opacity: 0.5;">
@@ -970,6 +1328,39 @@ $help_requests = []; while($row = $help_requests_res->fetch_assoc()) { $help_req
     </div>
     <script>
         lucide.createIcons();
+        
+        // Real-time updates for Camp Manager
+        let lastUpdateCheck = '<?php echo date('Y-m-d H:i:s'); ?>';
+        setInterval(() => {
+            fetch(`camp_manager_dashboard.php?api=check_updates&last_check=${encodeURIComponent(lastUpdateCheck)}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.new_tasks > 0 || data.new_volunteers > 0 || data.new_distributions > 0) {
+                        // For simplicity, we'll just show a subtle refresh indicator or auto-reload 
+                        // if the user is on the dashboard/task/distribution pages
+                        const currentPage = '<?php echo $page; ?>';
+                        if (['dashboard', 'tasks', 'distribution', 'volunteers'].includes(currentPage)) {
+                            // You could do a partial AJAX reload here, but for now a toast/reload is easier
+                            console.log("New updates available:", data);
+                            // We can use a small notification badge on the sidebar or a toast
+                            showToast("Updates available. Data has been refreshed.");
+                            // Refresh data by reloading (user said "updated in realtime", 
+                            // so maybe silent reload or updating specific elements)
+                            setTimeout(() => location.reload(), 2000); 
+                        }
+                    }
+                    lastUpdateCheck = data.timestamp;
+                });
+        }, 8000);
+
+        function showToast(msg) {
+            const toast = document.createElement('div');
+            toast.style.cssText = "position: fixed; bottom: 20px; right: 20px; background: #0f172a; color: white; padding: 12px 24px; border-radius: 12px; z-index: 9999; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); font-size: 0.9rem; font-weight: 600; border-left: 4px solid #4f46e5;";
+            toast.innerHTML = `✨ ${msg}`;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 5000);
+        }
+
         function toggleModal(id) {
             const modal = document.getElementById(id);
             if (modal) modal.classList.toggle('show');
