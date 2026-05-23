@@ -1474,6 +1474,270 @@ if ($page === 'inventory') {
             </form>
         </div>
     </div>
+
+    <!-- Donation Details Modal -->
+    <div id="donationDetailsModal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.4); backdrop-filter:blur(8px); z-index:100; place-items:center; padding:2rem; overflow-y:auto;">
+        <div class="panel" style="width:100%; max-width:700px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.3); border-radius:24px; border:1px solid rgba(255,255,255,0.2); overflow:hidden; background:rgba(255,255,255,0.98); animation: modalFadeIn 0.3s ease-out; display:flex; flex-direction:column; gap:0;">
+            <div class="panel-heading" style="border-bottom:1px solid #f1f5f9; padding:1.25rem 1.5rem; display:flex; justify-content:space-between; align-items:center; margin:0;">
+                <h3 style="font-size:1.25rem; font-weight:700; color:#0f172a; display:flex; align-items:center; gap:0.5rem; margin:0;">
+                    <span id="modal_header_icon">🎁</span> Donation Receipt Details
+                </h3>
+                <button type="button" onclick="closeDonationDetailsModal()" style="background:none; border:none; font-size:1.75rem; cursor:pointer; color:#94a3b8; transition:color 0.2s; line-height:1; margin:0; padding:0;" onmouseover="this.style.color='#0f172a'" onmouseout="this.style.color='#94a3b8'">&times;</button>
+            </div>
+            
+            <div style="padding:1.5rem; display:grid; grid-template-columns:1.1fr 0.9fr; gap:2rem; text-align:left; overflow-y:auto; max-height:calc(85vh - 200px);">
+                <!-- Left side: Donor & General Info -->
+                <div style="display:flex; flex-direction:column; gap:1.25rem; border-right:1px solid #e2e8f0; padding-right:1.75rem;">
+                    <div>
+                        <h4 style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin-bottom:0.5rem; font-weight:700; margin-top:0;">Donor Profile</h4>
+                        <div style="display:flex; align-items:center; gap:0.75rem; margin-top:0.25rem;">
+                            <div class="profile-avatar" id="modal_donor_avatar" style="width:42px; height:42px; font-weight:700; font-size:1.1rem; background:#eff6ff; color:#2563eb; display:grid; place-items:center; border-radius:50%;">U</div>
+                            <div>
+                                <div id="modal_donor_name" style="font-weight:700; color:#0f172a; font-size:0.95rem;">Hasan Mahmud</div>
+                                <div id="modal_donor_role" style="font-size:0.75rem; color:#64748b;">Registered Donor</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <h4 style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin-bottom:0.35rem; font-weight:700; margin-top:0;">Contact Details</h4>
+                        <p style="font-size:0.88rem; color:#334155; display:flex; align-items:center; gap:0.5rem; margin:0 0 0.35rem 0;">
+                            📧 <span id="modal_donor_email">hasan@example.com</span>
+                        </p>
+                        <p style="font-size:0.88rem; color:#334155; display:flex; align-items:center; gap:0.5rem; margin:0;">
+                            📞 <span id="modal_donor_phone">+8801711111111</span>
+                        </p>
+                    </div>
+
+                    <div>
+                        <h4 style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin-bottom:0.35rem; font-weight:700; margin-top:0;">Target Campaign</h4>
+                        <p id="modal_campaign" style="font-size:0.88rem; color:#334155; font-weight:600; margin:0;">Flood Relief - Dhaka Division</p>
+                    </div>
+
+                    <div>
+                        <h4 style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin-bottom:0.35rem; font-weight:700; margin-top:0;">Donor Note</h4>
+                        <div id="modal_message_box" style="background:#f8fafc; border-left:3px solid #cbd5e1; padding:0.75rem 1rem; border-radius:0 8px 8px 0; font-size:0.88rem; color:#475569; font-style:italic; line-height:1.4; margin:0;">
+                            "I hope this helps the affected people in Sylhet."
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right side: Donation Specifics & Logistics -->
+                <div style="display:flex; flex-direction:column; gap:1.25rem;">
+                    <div>
+                        <h4 style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin-bottom:0.35rem; font-weight:700; margin-top:0;">Donation Contribution</h4>
+                        <div id="modal_amount_badge" style="font-size:1.8rem; font-weight:800; color:#0f172a; margin-top:0.15rem; line-height:1.2;">
+                            ৳ 5,000.00
+                        </div>
+                        <div id="modal_type_badge" style="margin-top:0.35rem;">
+                            <span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700; font-size:0.8rem; padding:0.4rem 0.8rem;">Money Donation</span>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h4 style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin-bottom:0.35rem; font-weight:700; margin-top:0;">Transaction Reference</h4>
+                        <p style="font-size:0.88rem; color:#334155; margin:0 0 0.35rem 0;">
+                            Method: <strong id="modal_method" style="color:#0f172a;">bKash</strong>
+                        </p>
+                        <p style="font-size:0.88rem; color:#334155; margin:0;">
+                            Txn ID: <code id="modal_txn" style="font-size:0.85rem; background:#f1f5f9; padding:0.25rem 0.5rem; border-radius:6px; color:#475569; font-family:monospace; font-weight:600;">BKASH-MOCK-TXN-12345</code>
+                        </p>
+                    </div>
+
+                    <!-- Supply pickup details panel (conditionally displayed by JS) -->
+                    <div id="modal_supply_logistics" style="display:none; background:#f0fdf4; border:1px solid #bbf7d0; padding:0.85rem; border-radius:14px; text-align:left;">
+                        <h4 style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#166534; margin-bottom:0.35rem; font-weight:700; margin-top:0;">Logistics & Delivery</h4>
+                        <p style="font-size:0.85rem; color:#14532d; margin:0 0 0.25rem 0;">
+                            Method: <strong id="modal_delivery_method">Pick up Service</strong>
+                        </p>
+                        <p style="font-size:0.85rem; color:#14532d; margin:0 0 0.25rem 0;">
+                            Phone: <strong id="modal_pickup_phone">+88017...</strong>
+                        </p>
+                        <p style="font-size:0.85rem; color:#14532d; margin:0; line-height:1.4;">
+                            Address: <span id="modal_pickup_address" style="font-weight:600;">123 Camp Road, Sylhet</span>
+                        </p>
+                    </div>
+
+                    <div>
+                        <h4 style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin-bottom:0.35rem; font-weight:700; margin-top:0;">Status Details</h4>
+                        <p style="font-size:0.88rem; color:#334155; display:flex; align-items:center; gap:0.5rem; margin:0 0 0.35rem 0;">
+                            Date: <strong id="modal_date" style="color:#0f172a;">May 21, 2026</strong>
+                        </p>
+                        <p style="font-size:0.88rem; color:#334155; margin:0; display:flex; align-items:center; gap:0.5rem;">
+                            Status: <span id="modal_status_badge" class="badge active">Completed</span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer: Interactive forms for actions if pending -->
+            <div id="modal_actions_section" style="border-top:1px solid #f1f5f9; padding:1.25rem 1.5rem; background:#f8fafc; display:none; border-bottom-left-radius:24px; border-bottom-right-radius:24px;">
+                <div id="modal_supplies_allocation_help" style="display:none; background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; padding:0.75rem 1rem; border-radius:12px; font-size:0.85rem; line-height:1.4; margin-bottom:1rem; text-align:left;">
+                    💡 <strong>Inventory Camp Assignment:</strong> Please choose which Camp inventory this supply donation will be delivered to. Once approved, the stock quantity will increase instantly.
+                </div>
+                
+                <form id="modal_approval_form" method="POST" style="margin:0; text-align:left;">
+                    <input type="hidden" name="action" value="approve_donation">
+                    <input type="hidden" name="donation_id" id="modal_donation_id">
+                    
+                    <div class="form-field" id="modal_camp_selection_field" style="margin-bottom:1.25rem;">
+                        <label style="font-weight:700; color:#334155; font-size:0.88rem; display:block; margin-bottom:0.5rem;">Allocate / Assign to Camp's Stock</label>
+                        <select name="camp_id" id="modal_camp_id" style="border-radius:12px; border:1px solid #cbd5e1; padding:0.75rem; font-size:0.9rem; width:100%; display:block; background:#ffffff;" required>
+                            <option value="">Select a Camp for Stock Delivery</option>
+                            <?php foreach ($camps as $c): ?>
+                                <option value="<?php echo $c['id']; ?>"><?php echo htmlspecialchars($c['camp_name']) . " (" . htmlspecialchars($c['location']) . ")"; ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    
+                    <div style="display:flex; gap:0.75rem; align-items:center; justify-content:stretch;">
+                        <button type="submit" class="btn-primary" style="flex:2; background:#22c55e; color:white; border:none; padding:0.85rem 1.5rem; font-size:0.95rem; border-radius:14px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; gap:0.5rem; cursor:pointer; transition:all 0.25s;" onmouseover="this.style.background='#16a34a'" onmouseout="this.style.background='#22c55e'">
+                            ✓ Approve & Update Inventory
+                        </button>
+                </form>
+                
+                <form id="modal_reject_form" method="POST" style="margin:0; flex:1;">
+                    <input type="hidden" name="action" value="reject_donation">
+                    <input type="hidden" name="donation_id" id="modal_reject_donation_id">
+                    <button type="submit" class="btn-danger" style="width:100%; border:none; padding:0.85rem 1.5rem; font-size:0.95rem; border-radius:14px; font-weight:700; text-align:center; cursor:pointer; transition:all 0.25s; display:inline-flex; align-items:center; justify-content:center;" onclick="return confirm('Are you sure you want to reject/fail this donation request?');">
+                        Reject Donation
+                    </button>
+                </form>
+                    </div>
+            </div>
+
+            <!-- Footer Section if already processed -->
+            <div id="modal_processed_note" style="border-top:1px solid #f1f5f9; padding:1rem 1.5rem; background:#f8fafc; display:none; text-align:center; border-bottom-left-radius:24px; border-bottom-right-radius:24px;">
+                <div style="background:#f1f5f9; border:1px solid #e2e8f0; color:#64748b; padding:0.6rem 1.25rem; border-radius:10px; font-size:0.85rem; font-weight:600; display:inline-flex; align-items:center; gap:0.5rem;">
+                    🔒 This donation record has already been finalized and is read-only.
+                </div>
+            </div>
+
+            <div style="display:flex; justify-content:flex-end; padding:1.25rem 1.5rem; border-top:1px solid #f1f5f9; background:#ffffff; border-bottom-left-radius:24px; border-bottom-right-radius:24px;">
+                <button type="button" class="btn-secondary" style="padding:0.65rem 1.5rem; border-radius:12px; font-weight:700; font-size:0.9rem;" onclick="closeDonationDetailsModal()">Close Window</button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        @keyframes modalFadeIn {
+            from { opacity: 0; transform: scale(0.97) translateY(10px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+    </style>
+
+    <script>
+        function openDonationDetailsModal(donation) {
+            console.log("Opening donation details modal", donation);
+            
+            // Set header icon
+            const isMoney = donation.donation_type === 'money';
+            document.getElementById('modal_header_icon').textContent = isMoney ? '💵' : '🎁';
+            
+            // Set donor details
+            const name = donation.donor_name || 'Guest Donor';
+            document.getElementById('modal_donor_name').textContent = name;
+            document.getElementById('modal_donor_avatar').textContent = name.trim().charAt(0).toUpperCase();
+            document.getElementById('modal_donor_email').textContent = donation.donor_email || 'N/A';
+            document.getElementById('modal_donor_phone').textContent = donation.donor_phone || 'N/A';
+            
+            // Set campaign
+            document.getElementById('modal_campaign').textContent = donation.campaign_name || 'General Relief Fund';
+            
+            // Set note/message
+            const messageBox = document.getElementById('modal_message_box');
+            if (donation.message && donation.message.trim()) {
+                messageBox.textContent = `"${donation.message}"`;
+                messageBox.parentElement.style.display = 'block';
+            } else {
+                messageBox.parentElement.style.display = 'none';
+            }
+            
+            // Set amount & type badges
+            const amountBadge = document.getElementById('modal_amount_badge');
+            const typeBadge = document.getElementById('modal_type_badge');
+            if (isMoney) {
+                amountBadge.textContent = '৳ ' + parseFloat(donation.amount).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                typeBadge.innerHTML = '<span class="badge" style="background:#ecfdf5; color:#065f46; font-weight:700; font-size:0.8rem; padding:0.4rem 0.8rem; border-radius:999px;">💵 Money Contribution</span>';
+            } else {
+                amountBadge.textContent = parseInt(donation.amount) + ' ' + (donation.item_name || 'Items');
+                typeBadge.innerHTML = '<span class="badge" style="background:#eff6ff; color:#1e40af; font-weight:700; font-size:0.8rem; padding:0.4rem 0.8rem; border-radius:999px;">🎁 Supplies Contribution</span>';
+            }
+            
+            // Set reference/txn
+            document.getElementById('modal_method').textContent = donation.payment_method || 'N/A';
+            document.getElementById('modal_txn').textContent = donation.transaction_id || 'N/A';
+            
+            // Set Logistics/Pickup details for supplies
+            const logisticsPanel = document.getElementById('modal_supply_logistics');
+            if (!isMoney && (donation.pickup_address || donation.pickup_phone || donation.supply_delivery_method)) {
+                logisticsPanel.style.display = 'block';
+                document.getElementById('modal_delivery_method').textContent = donation.supply_delivery_method === 'pickup' ? 'Pick up Service' : 'Camp Dropoff';
+                document.getElementById('modal_pickup_phone').textContent = donation.pickup_phone || 'N/A';
+                document.getElementById('modal_pickup_address').textContent = donation.pickup_address || 'N/A';
+            } else {
+                logisticsPanel.style.display = 'none';
+            }
+            
+            // Set date & status badges
+            const options = { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+            const formattedDate = new Date(donation.created_at).toLocaleDateString('en-US', options);
+            document.getElementById('modal_date').textContent = formattedDate;
+            
+            const statusBadge = document.getElementById('modal_status_badge');
+            statusBadge.textContent = donation.status.charAt(0).toUpperCase() + donation.status.slice(1);
+            statusBadge.className = 'badge ' + (donation.status === 'completed' ? 'active' : (donation.status === 'pending' ? 'inactive' : 'btn-danger'));
+            if (donation.status === 'failed') {
+                statusBadge.style.cssText = 'background:#fef2f2; color:#ef4444; font-weight:700; border-radius:999px;';
+            } else {
+                statusBadge.style.cssText = 'border-radius:999px;';
+            }
+            
+            // Toggle interactive forms if pending
+            const actionsSection = document.getElementById('modal_actions_section');
+            const processedNote = document.getElementById('modal_processed_note');
+            
+            if (donation.status === 'pending') {
+                actionsSection.style.display = 'block';
+                processedNote.style.display = 'none';
+                
+                // Form setup
+                document.getElementById('modal_donation_id').value = donation.id;
+                document.getElementById('modal_reject_donation_id').value = donation.id;
+                
+                // Pre-populate camp drop-down if camp_id is set
+                const campDropdown = document.getElementById('modal_camp_id');
+                if (donation.camp_id) {
+                    campDropdown.value = donation.camp_id;
+                } else {
+                    campDropdown.value = "";
+                }
+                
+                // Toggle extra info for supply assignment help & require/hide field depending on type
+                const helpInfo = document.getElementById('modal_supplies_allocation_help');
+                const campSelectField = document.getElementById('modal_camp_selection_field');
+                
+                if (donation.donation_type === 'supplies') {
+                    helpInfo.style.display = 'block';
+                    campSelectField.style.display = 'block';
+                    campDropdown.required = true;
+                } else {
+                    helpInfo.style.display = 'none';
+                    campSelectField.style.display = 'none';
+                    campDropdown.required = false;
+                }
+            } else {
+                actionsSection.style.display = 'none';
+                processedNote.style.display = 'block';
+            }
+            
+            document.getElementById('donationDetailsModal').style.display = 'grid';
+        }
+
+        function closeDonationDetailsModal() {
+            document.getElementById('donationDetailsModal').style.display = 'none';
+        }
+    </script>
 </body>
 </html>
 <?php $conn->close(); ?>
