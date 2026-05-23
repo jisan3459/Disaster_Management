@@ -42,27 +42,35 @@ if (!in_array('phone', $existing_u_cols)) { $conn->query("ALTER TABLE users ADD 
 if (!in_array('skills', $existing_u_cols)) { $conn->query("ALTER TABLE users ADD COLUMN skills TEXT AFTER phone"); }
 if (!in_array('availability', $existing_u_cols)) { $conn->query("ALTER TABLE users ADD COLUMN availability VARCHAR(100) AFTER skills"); }
 
-// Task Table Migration
-$t_cols = $conn->query("SHOW COLUMNS FROM tasks");
-$existing_t_cols = [];
-while($row = $t_cols->fetch_assoc()) { $existing_t_cols[] = $row['Field']; }
-if (!in_array('description', $existing_t_cols)) { $conn->query("ALTER TABLE tasks ADD COLUMN description TEXT AFTER task_name"); }
-if (!in_array('due_date', $existing_t_cols)) { $conn->query("ALTER TABLE tasks ADD COLUMN due_date DATE AFTER status"); }
-
-// Update priority ENUM to include urgent
-$priority_check = $conn->query("SHOW COLUMNS FROM tasks LIKE 'priority'");
-$priority_row = $priority_check->fetch_assoc();
-if (strpos($priority_row['Type'], 'urgent') === false) {
-    $conn->query("ALTER TABLE tasks MODIFY COLUMN priority ENUM('low', 'medium', 'high', 'urgent') DEFAULT 'medium'");
-}
-
-
-// Fetch the camp managed by this user
+// Fetch the camp managed by this user or matching their location
+$user_location = $user['location'] ?? '';
 $camp_res = $conn->query("SELECT * FROM camps WHERE manager_id = $user_id LIMIT 1");
-$camp = $camp_res->fetch_assoc();
-$camp_id = $camp['id'] ?? 0;
-$camp_name = $camp['camp_name'] ?? 'Unassigned';
-$camp_location = $camp['location'] ?? 'Not set';
+if ($camp_res && $camp_res->num_rows === 0 && !empty($user_location)) {
+    $camp_res = $conn->query("SELECT * FROM camps WHERE location = '$user_location' LIMIT 1");
+}
+$camp = $camp_res ? $camp_res->fetch_assoc() : null;
+if (!$camp) {
+    $camp = [
+        'id' => 0,
+        'camp_name' => 'Unassigned',
+        'location' => $user_location ?: 'Not set',
+        'capacity' => 500,
+        'current_occupancy' => 0
+    ];
+}
+$camp_id = $camp['id'];
+$camp_name = $camp['camp_name'];
+$camp_location = $camp['location'];
+
+// Ensure distributions table exists
+$conn->query("CREATE TABLE IF NOT EXISTS distributions (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    camp_id INT,
+    recipient_name VARCHAR(255) NOT NULL,
+    items TEXT NOT NULL,
+    distributed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (camp_id) REFERENCES camps(id)
+)");
 
 // Handle Actions
 $success_msg = '';
@@ -87,14 +95,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         if ($action === 'assign_task') {
             $task_name = sanitize($_POST['task_name']);
-            $description = sanitize($_POST['description']);
             $vol_id = intval($_POST['volunteer_id']);
             $priority = sanitize($_POST['priority']);
-            $due_date = sanitize($_POST['due_date']);
             
-            $insert = $conn->query("INSERT INTO tasks (task_name, description, camp_id, assigned_to, assigned_by, priority, status, due_date) VALUES ('$task_name', '$description', $camp_id, $vol_id, $user_id, '$priority', 'pending', '$due_date')");
+            $insert = $conn->query("INSERT INTO tasks (task_name, camp_id, assigned_to, assigned_by, priority, status) VALUES ('$task_name', $camp_id, $vol_id, $user_id, '$priority', 'pending')");
             if ($insert) { $success_msg = "Task assigned successfully."; } 
-            else { $error_msg = "Failed to assign task: " . $conn->error; }
+            else { $error_msg = "Failed to assign task."; }
+        }
+
+        if ($action === 'approve_affected') {
+            $affected_id = intval($_POST['affected_id']);
+            $update = $conn->query("UPDATE affected_persons SET registration_status = 'assigned', camp_id = $camp_id WHERE id = $affected_id");
+            if ($update) { $success_msg = "Person approved and assigned to camp successfully."; } 
+            else { $error_msg = "Failed to assign person."; }
         }
 
         if ($action === 'update_inventory_detailed') {
@@ -118,6 +131,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             else { $error_msg = "Failed to add item."; }
         }
 
+        if ($action === 'create_task_from_request') {
+            $req_id = intval($_POST['request_id']);
+            $vol_id = intval($_POST['volunteer_id']);
+            $task_name = sanitize($_POST['task_name']);
+            $priority = sanitize($_POST['priority']);
+            $desc = sanitize($_POST['description']);
+
+            $conn->query("UPDATE affected_help_requests SET status = 'assigned' WHERE id = $req_id");
+            $insert = $conn->query("INSERT INTO tasks (task_name, description, camp_id, assigned_to, assigned_by, priority, status) VALUES ('$task_name', '$desc', $camp_id, $vol_id, $user_id, '$priority', 'pending')");
+            
+            if ($insert) { $success_msg = "Task created and assigned to volunteer."; }
+            else { $error_msg = "Failed to create task."; }
+        }
+
         if ($action === 'add_volunteer') {
             $name = sanitize($_POST['full_name']);
             $email = sanitize($_POST['email']);
@@ -136,7 +163,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-
 $page = isset($_GET['page']) ? $_GET['page'] : 'dashboard';
 
 // Fetch Global Data
@@ -144,8 +170,8 @@ $stats = [
     ['label' => 'Current Occupancy', 'value' => ($camp['current_occupancy'] ?? 0), 'meta' => 'of ' . ($camp['capacity'] ?? 500), 'icon' => 'users', 'color' => '#6366f1'],
     ['label' => 'Supply Items', 'value' => $conn->query("SELECT COUNT(*) FROM inventory WHERE camp_id = $camp_id")->fetch_row()[0], 'meta' => 'Total items', 'icon' => 'package', 'color' => '#10b981'],
     ['label' => 'Active Tasks', 'value' => $conn->query("SELECT COUNT(*) FROM tasks WHERE camp_id = $camp_id AND status = 'pending'")->fetch_row()[0], 'meta' => 'Pending', 'icon' => 'clipboard-list', 'color' => '#f97316'],
+    ['label' => 'Distributions', 'value' => $conn->query("SELECT COUNT(*) FROM distributions WHERE camp_id = $camp_id")->fetch_row()[0], 'meta' => 'Recent', 'icon' => 'trending-up', 'color' => '#8b5cf6'],
 ];
-
 
 $unread_query = $conn->query("SELECT COUNT(*) AS count FROM notifications WHERE user_id = $user_id AND is_read = 0");
 $unread_count = $unread_query ? $unread_query->fetch_assoc()['count'] : 0;
@@ -154,9 +180,14 @@ $unread_count = $unread_query ? $unread_query->fetch_assoc()['count'] : 0;
 $chart_inventory_res = $conn->query("SELECT item_name, quantity FROM inventory WHERE camp_id = $camp_id ORDER BY quantity DESC LIMIT 5");
 $chart_data = []; while($row = $chart_inventory_res->fetch_assoc()) { $chart_data[] = $row; }
 
+$recent_dist_res = $conn->query("SELECT * FROM distributions WHERE camp_id = $camp_id ORDER BY distributed_at DESC LIMIT 5");
+$recent_distributions = []; while($row = $recent_dist_res->fetch_assoc()) { $recent_distributions[] = $row; }
 
-$families_res = $conn->query("SELECT * FROM families WHERE camp_id = $camp_id ORDER BY created_at DESC");
-$families = []; while($row = $families_res->fetch_assoc()) { $families[] = $row; }
+$assigned_affected_res = $conn->query("SELECT * FROM affected_persons WHERE camp_id = $camp_id ORDER BY created_at DESC");
+$assigned_affected = []; while($row = $assigned_affected_res->fetch_assoc()) { $assigned_affected[] = $row; }
+
+$pending_affected_res = $conn->query("SELECT * FROM affected_persons WHERE location = '$camp_location' AND registration_status = 'pending' ORDER BY created_at ASC");
+$pending_affected = []; while($row = $pending_affected_res->fetch_assoc()) { $pending_affected[] = $row; }
 
 $inventory_res = $conn->query("SELECT * FROM inventory WHERE camp_id = $camp_id ORDER BY item_name ASC");
 $inventory = []; while($row = $inventory_res->fetch_assoc()) { $inventory[] = $row; }
@@ -167,14 +198,8 @@ $volunteers = []; while($row = $volunteers_res->fetch_assoc()) { $volunteers[] =
 $tasks_res = $conn->query("SELECT t.*, u.full_name as assigned_name FROM tasks t LEFT JOIN users u ON t.assigned_to = u.id WHERE t.camp_id = $camp_id ORDER BY t.created_at DESC");
 $tasks = []; while($row = $tasks_res->fetch_assoc()) { $tasks[] = $row; }
 
-// Task Stats for the Tasks Page
-$task_stats = [
-    'total' => $conn->query("SELECT COUNT(*) FROM tasks WHERE camp_id = $camp_id")->fetch_row()[0],
-    'pending' => $conn->query("SELECT COUNT(*) FROM tasks WHERE camp_id = $camp_id AND status = 'pending'")->fetch_row()[0],
-    'in_progress' => $conn->query("SELECT COUNT(*) FROM tasks WHERE camp_id = $camp_id AND status = 'in_progress'")->fetch_row()[0],
-    'completed' => $conn->query("SELECT COUNT(*) FROM tasks WHERE camp_id = $camp_id AND status = 'completed'")->fetch_row()[0],
-];
-
+$help_requests_res = $conn->query("SELECT ahr.*, ap.full_name as requester_name FROM affected_help_requests ahr JOIN affected_persons ap ON ahr.affected_id = ap.id WHERE ap.camp_id = $camp_id AND ahr.status = 'pending' ORDER BY ahr.created_at ASC");
+$help_requests = []; while($row = $help_requests_res->fetch_assoc()) { $help_requests[] = $row; }
 
 ?>
 <!DOCTYPE html>
@@ -330,8 +355,7 @@ $task_stats = [
                 <a href="?page=inventory" class="menu-link <?php echo $page === 'inventory' ? 'active' : ''; ?>"><i data-lucide="package"></i> <span>Supplies</span></a>
                 <a href="?page=volunteers" class="menu-link <?php echo $page === 'volunteers' ? 'active' : ''; ?>"><i data-lucide="user-check"></i> <span>Volunteers</span></a>
                 <a href="?page=tasks" class="menu-link <?php echo $page === 'tasks' ? 'active' : ''; ?>"><i data-lucide="clipboard-list"></i> <span>Tasks</span></a>
-                <a href="?page=distribution" class="menu-link <?php echo $page === 'distribution' ? 'active' : ''; ?>"><i data-lucide="truck"></i> <span>Aid Distribution</span></a>
-
+                <a href="?page=distribution" class="menu-link <?php echo $page === 'distribution' ? 'active' : ''; ?>"><i data-lucide="trending-up"></i> <span>Aid Distribution</span></a>
                 <a href="?page=report" class="menu-link <?php echo $page === 'report' ? 'active' : ''; ?>"><i data-lucide="file-text"></i> <span>Reports</span></a>
                 <a href="?page=chat" class="menu-link <?php echo $page === 'chat' ? 'active' : ''; ?>"><i data-lucide="message-square"></i> <span>Messages</span></a>
                 <a href="?page=settings" class="menu-link <?php echo $page === 'settings' ? 'active' : ''; ?>"><i data-lucide="settings"></i> <span>Settings</span></a>
@@ -355,12 +379,9 @@ $task_stats = [
                 ?></span></div>
                 <div class="header-actions">
                     <?php if ($page === 'families'): ?>
-                        <button class="btn btn-primary" style="background: #0f172a;" onclick="toggleModal('registerModal')"><i data-lucide="plus" style="width:18px;"></i> Register Family</button>
+                        <button class="btn btn-primary" style="background: #0f172a;" onclick="toggleModal('registerModal')"><i data-lucide="plus" style="width:18px;"></i> Register Manually</button>
                     <?php elseif ($page === 'volunteers'): ?>
                         <button class="btn btn-primary" style="background: #0f172a;" onclick="toggleModal('addVolunteerModal')"><i data-lucide="user-plus" style="width:18px;"></i> Add Volunteer</button>
-                    <?php elseif ($page === 'tasks'): ?>
-                        <button class="btn btn-primary" style="background: #0f172a;" onclick="toggleModal('addTaskModal')"><i data-lucide="plus" style="width:18px;"></i> Create Task</button>
-
                     <?php else: ?>
                         <button class="btn btn-outline" onclick="location.reload()"><i data-lucide="refresh-cw" style="width:18px;"></i></button>
                         <button class="btn btn-primary" onclick="location.href='?page=report'"><i data-lucide="file-text" style="width:18px;"></i> Report</button>
@@ -386,11 +407,18 @@ $task_stats = [
                             <div class="panel-header"><h3 class="panel-title">Supply Levels</h3><button class="btn btn-outline btn-sm" onclick="location.href='?page=inventory'">Details</button></div>
                             <div class="panel-content"><div class="chart-container"><div class="chart-grid"><?php $max_qty = 0; foreach($chart_data as $item) if($item['quantity'] > $max_qty) $max_qty = $item['quantity']; if($max_qty == 0) $max_qty = 100; foreach([1, 0.75, 0.5, 0.25, 0] as $s): ?><div class="chart-grid-line" data-value="<?php echo round($max_qty * $s); ?>"></div><?php endforeach; ?></div><div class="chart-bars-area"><?php foreach ($chart_data as $item): $h = ($item['quantity'] / $max_qty) * 100; ?><div class="chart-bar" style="height: <?php echo $h; ?>%;"></div><?php endforeach; ?></div><div class="chart-bar-labels"><?php foreach ($chart_data as $item): ?><div class="chart-bar-label"><?php echo htmlspecialchars($item['item_name']); ?></div><?php endforeach; ?></div></div></div>
                         </div>
+                        <div class="panel">
+                            <div class="panel-header"><h3 class="panel-title">Recent Distributions</h3><button class="btn btn-outline btn-sm" onclick="location.href='?page=distribution'">Log New</button></div>
+                            <div class="panel-content">
+                                <?php foreach (array_slice($recent_distributions, 0, 4) as $dist): ?>
+                                    <div style="padding: 1rem; background: #f8fafc; border-radius: 12px; margin-bottom: 10px; display: flex; justify-content: space-between;"><div><p style="font-weight: 700; font-size: 0.9rem;"><?php echo htmlspecialchars($dist['recipient_name']); ?></p><p style="font-size: 0.8rem; color: var(--text-muted);"><?php echo htmlspecialchars($dist['items']); ?></p></div><p style="font-size: 0.75rem; color: #94a3b8; font-weight: 600;"><?php echo date('M d', strtotime($dist['distributed_at'])); ?></p></div>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
                     </div>
-
                     <div class="panel">
-                        <div class="panel-header"><h3 class="panel-title">Registered Families</h3><button class="btn btn-outline btn-sm" onclick="location.href='?page=families'">View All</button></div>
-                        <div class="table-container"><table><thead><tr><th>Name</th><th>Members</th><th>Village</th><th>Needs</th><th>Date</th></tr></thead><tbody><?php foreach (array_slice($families, 0, 5) as $f): ?><tr><td><span style="font-weight: 600;"><?php echo htmlspecialchars($f['head_name']); ?></span></td><td><span class="badge" style="background:#f1f5f9;"><?php echo $f['family_members']; ?></span></td><td><?php echo htmlspecialchars($f['village']); ?></td><td><?php echo htmlspecialchars(substr($f['needs'], 0, 40)); ?>...</td><td style="color: #94a3b8;"><?php echo date('M d', strtotime($f['created_at'])); ?></td></tr><?php endforeach; ?></tbody></table></div>
+                        <div class="panel-header"><h3 class="panel-title">Assigned People</h3><button class="btn btn-outline btn-sm" onclick="location.href='?page=families'">View All</button></div>
+                        <div class="table-container"><table><thead><tr><th>Name</th><th>Members</th><th>Location</th><th>Needs</th><th>Date</th></tr></thead><tbody><?php foreach (array_slice($assigned_affected, 0, 5) as $f): ?><tr><td><span style="font-weight: 600;"><?php echo htmlspecialchars($f['full_name']); ?></span></td><td><span class="badge" style="background:#f1f5f9;"><?php echo $f['family_members']; ?></span></td><td><?php echo htmlspecialchars($f['location']); ?></td><td><?php echo htmlspecialchars(substr($f['needs'] ?? '', 0, 40)); ?>...</td><td style="color: #94a3b8;"><?php echo date('M d', strtotime($f['created_at'])); ?></td></tr><?php endforeach; ?></tbody></table></div>
                     </div>
 
                 <?php elseif ($page === 'overview'): ?>
@@ -463,13 +491,13 @@ $task_stats = [
 
                 <?php elseif ($page === 'families'): ?>
                     <?php
-                    $total_reg = $conn->query("SELECT COUNT(*) FROM families WHERE camp_id = $camp_id")->fetch_row()[0];
-                    $total_ind = $conn->query("SELECT SUM(family_members) FROM families WHERE camp_id = $camp_id")->fetch_row()[0] ?? 0;
-                    $new_week = $conn->query("SELECT COUNT(*) FROM families WHERE camp_id = $camp_id AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)")->fetch_row()[0];
+                    $total_reg = $conn->query("SELECT COUNT(*) FROM affected_persons WHERE camp_id = $camp_id")->fetch_row()[0];
+                    $total_ind = $conn->query("SELECT SUM(family_members) FROM affected_persons WHERE camp_id = $camp_id")->fetch_row()[0] ?? 0;
+                    $new_week = $conn->query("SELECT COUNT(*) FROM affected_persons WHERE camp_id = $camp_id AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)")->fetch_row()[0];
                     ?>
                     <div class="ap-stats-grid">
                         <div class="ap-stat-card">
-                            <p class="ap-stat-label">Total Registered</p>
+                            <p class="ap-stat-label">Total Assigned</p>
                             <p class="ap-stat-value"><?php echo $total_reg; ?></p>
                         </div>
                         <div class="ap-stat-card">
@@ -482,28 +510,68 @@ $task_stats = [
                         </div>
                     </div>
 
-                    <div class="ap-table-panel">
-                        <div class="ap-table-header">Registered Families & Individuals</div>
+                    <?php if (count($pending_affected) > 0): ?>
+                    <div class="ap-table-panel" style="margin-bottom: 2rem; border-color: #fcd34d; box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.1);">
+                        <div class="ap-table-header" style="color: #d97706; display: flex; align-items: center; gap: 8px;">
+                            <i data-lucide="alert-circle" style="width: 20px;"></i> Pending Requests in <?php echo htmlspecialchars($camp_location); ?>
+                        </div>
                         <div class="table-container">
                             <table>
                                 <thead>
                                     <tr>
                                         <th>Name</th>
                                         <th>Family Members</th>
+                                        <th>Location</th>
+                                        <th>Requested Date</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($pending_affected as $p): ?>
+                                        <tr>
+                                            <td><span style="font-weight: 600;"><?php echo htmlspecialchars($p['full_name']); ?></span></td>
+                                            <td><?php echo $p['family_members']; ?></td>
+                                            <td><?php echo htmlspecialchars($p['location']); ?></td>
+                                            <td><?php echo date('Y-m-d', strtotime($p['created_at'])); ?></td>
+                                            <td>
+                                                <form method="POST" style="display:inline;">
+                                                    <input type="hidden" name="action" value="approve_affected">
+                                                    <input type="hidden" name="affected_id" value="<?php echo $p['id']; ?>">
+                                                    <button type="submit" class="btn btn-primary btn-sm" style="background: #10b981; border:none;">Approve & Assign</button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+
+                    <div class="ap-table-panel">
+                        <div class="ap-table-header">Assigned People & Families</div>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Family Members</th>
+                                        <th>Location</th>
                                         <th>Needs</th>
                                         <th>Registered Date</th>
                                         <th>Status</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php if (empty($families)): ?>
-                                        <tr><td colspan="5" style="text-align:center; padding: 3rem; color: var(--text-muted);">No residents registered yet.</td></tr>
+                                    <?php if (empty($assigned_affected)): ?>
+                                        <tr><td colspan="6" style="text-align:center; padding: 3rem; color: var(--text-muted);">No assigned residents yet.</td></tr>
                                     <?php else: ?>
-                                        <?php foreach ($families as $f): ?>
+                                        <?php foreach ($assigned_affected as $f): ?>
                                             <tr>
-                                                <td><span style="font-weight: 600;"><?php echo htmlspecialchars($f['head_name']); ?></span></td>
+                                                <td><span style="font-weight: 600;"><?php echo htmlspecialchars($f['full_name']); ?></span></td>
                                                 <td><?php echo $f['family_members']; ?></td>
-                                                <td><span style="color: var(--text-muted);"><?php echo htmlspecialchars($f['needs']); ?></span></td>
+                                                <td><?php echo htmlspecialchars($f['location']); ?></td>
+                                                <td><span style="color: var(--text-muted);"><?php echo htmlspecialchars($f['needs'] ?? 'N/A'); ?></span></td>
                                                 <td><?php echo date('Y-m-d', strtotime($f['created_at'])); ?></td>
                                                 <td><span class="badge status-badge-assigned">assigned</span></td>
                                             </tr>
@@ -709,59 +777,81 @@ $task_stats = [
                     </div>
 
                 <?php elseif ($page === 'tasks'): ?>
-                    <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
-                        <div class="stat-card">
-                            <div><p style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600;">Total Tasks</p><p style="font-size: 1.75rem; font-weight: 800; text-align: center;"><?php echo $task_stats['total']; ?></p></div>
-                        </div>
-                        <div class="stat-card">
-                            <div><p style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600;">In Progress</p><p style="font-size: 1.75rem; font-weight: 800; color: #f97316; text-align: center;"><?php echo $task_stats['in_progress']; ?></p></div>
-                        </div>
-                        <div class="stat-card">
-                            <div><p style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600;">Pending</p><p style="font-size: 1.75rem; font-weight: 800; color: #6366f1; text-align: center;"><?php echo $task_stats['pending']; ?></p></div>
-                        </div>
-                        <div class="stat-card">
-                            <div><p style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600;">Completed</p><p style="font-size: 1.75rem; font-weight: 800; color: #10b981; text-align: center;"><?php echo $task_stats['completed']; ?></p></div>
-                        </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                        <h2 style="font-size: 1.5rem; font-weight: 700;">Task Management</h2>
+                        <button class="btn btn-primary" onclick="toggleModal('addTaskModal')"><i data-lucide="plus"></i> New Manual Task</button>
                     </div>
 
-                    <div class="panel">
-                        <div class="panel-header"><h3 class="panel-title">All Tasks</h3></div>
+                    <?php if (count($help_requests) > 0): ?>
+                    <div class="ap-table-panel" style="margin-bottom: 2rem; border-left: 4px solid var(--warning);">
+                        <div class="ap-table-header" style="color: var(--warning); display: flex; align-items: center; gap: 8px;">
+                            <i data-lucide="alert-circle" style="width: 20px;"></i> Incoming Aid Requests
+                        </div>
                         <div class="table-container">
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Task</th>
+                                        <th>Requester</th>
+                                        <th>Category</th>
+                                        <th>Urgency</th>
+                                        <th>Description</th>
+                                        <th>Date</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($help_requests as $req): ?>
+                                        <tr>
+                                            <td><span style="font-weight: 600;"><?php echo htmlspecialchars($req['requester_name']); ?></span></td>
+                                            <td><span class="badge" style="background: #f1f5f9;"><?php echo htmlspecialchars($req['category']); ?></span></td>
+                                            <td>
+                                                <span class="badge" style="background: <?php echo $req['urgency'] === 'High' ? '#fef2f2; color: #dc2626;' : '#fff7ed; color: #ea580c;'; ?>">
+                                                    <?php echo htmlspecialchars($req['urgency']); ?>
+                                                </span>
+                                            </td>
+                                            <td style="max-width: 300px;"><?php echo htmlspecialchars($req['description']); ?></td>
+                                            <td style="font-size: 0.85rem; color: var(--text-muted);"><?php echo date('M d, H:i', strtotime($req['created_at'])); ?></td>
+                                            <td>
+                                                <button class="btn btn-primary btn-sm" onclick="openAssignModal(<?php echo htmlspecialchars(json_encode($req)); ?>)">Assign to Volunteer</button>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+
+                    <div class="ap-table-panel">
+                        <div class="ap-table-header">Ongoing & Recent Tasks</div>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Task Name</th>
+                                        <th>Assigned To</th>
                                         <th>Priority</th>
                                         <th>Status</th>
-                                        <th>Due Date</th>
-                                        <th>Assigned To</th>
+                                        <th>Created At</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <?php if (empty($tasks)): ?>
                                         <tr><td colspan="5" style="text-align:center; padding: 3rem; color: var(--text-muted);">No tasks found.</td></tr>
                                     <?php else: ?>
-                                        <?php foreach ($tasks as $t): 
-                                            $priority_color = '#64748b';
-                                            $priority_bg = '#f1f5f9';
-                                            if($t['priority'] === 'urgent') { $priority_color = '#e11d48'; $priority_bg = '#fff1f2'; }
-                                            elseif($t['priority'] === 'high') { $priority_color = '#f59e0b'; $priority_bg = '#fffbeb'; }
-                                            elseif($t['priority'] === 'medium') { $priority_color = '#2563eb'; $priority_bg = '#eff6ff'; }
-
-                                            $status_color = '#64748b';
-                                            $status_bg = '#f1f5f9';
-                                            if($t['status'] === 'completed') { $status_color = '#10b981'; $status_bg = '#f0fdf4'; }
-                                            elseif($t['status'] === 'in_progress') { $status_color = '#6366f1'; $status_bg = '#eef2ff'; }
-                                        ?>
+                                        <?php foreach ($tasks as $t): ?>
                                             <tr>
+                                                <td><span style="font-weight: 600;"><?php echo htmlspecialchars($t['task_name']); ?></span></td>
+                                                <td><?php echo htmlspecialchars($t['assigned_name'] ?? 'Unassigned'); ?></td>
+                                                <td><span class="badge" style="background: #f1f5f9;"><?php echo ucfirst($t['priority']); ?></span></td>
                                                 <td>
-                                                    <div style="font-weight: 700; color: #0f172a;"><?php echo htmlspecialchars($t['task_name']); ?></div>
-                                                    <div style="font-size: 0.75rem; color: var(--text-muted);"><?php echo htmlspecialchars($t['description'] ?? ''); ?></div>
+                                                    <span class="badge" style="background: <?php 
+                                                        echo $t['status'] === 'completed' ? '#ecfdf5; color: #166534;' : ($t['status'] === 'in_progress' ? '#eff6ff; color: #1e40af;' : '#f8fafc; color: #64748b;'); 
+                                                    ?>">
+                                                        <?php echo str_replace('_', ' ', $t['status']); ?>
+                                                    </span>
                                                 </td>
-                                                <td><span class="badge" style="background: <?php echo $priority_bg; ?>; color: <?php echo $priority_color; ?>; text-transform: capitalize;"><?php echo $t['priority']; ?></span></td>
-                                                <td><span class="badge" style="background: <?php echo $status_bg; ?>; color: <?php echo $status_color; ?>; text-transform: capitalize;"><?php echo str_replace('_', ' ', $t['status']); ?></span></td>
-                                                <td style="font-size: 0.85rem; font-weight: 500; color: #64748b;"><?php echo $t['due_date'] ? date('Y-m-d', strtotime($t['due_date'])) : 'No date'; ?></td>
-                                                <td><span style="font-weight: 600; font-size: 0.85rem;"><?php echo $t['assigned_name'] ? htmlspecialchars($t['assigned_name']) : '<span style="color:#94a3b8">Unassigned</span>'; ?></span></td>
+                                                <td style="font-size: 0.85rem; color: var(--text-muted);"><?php echo date('Y-m-d', strtotime($t['created_at'])); ?></td>
                                             </tr>
                                         <?php endforeach; ?>
                                     <?php endif; ?>
@@ -770,53 +860,87 @@ $task_stats = [
                         </div>
                     </div>
 
-                    <!-- Create Task Modal -->
-                    <div id="addTaskModal" class="modal">
+                    <!-- Assign Request Modal -->
+                    <div id="assignRequestModal" class="modal">
                         <div class="modal-content">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-                                <h3 style="font-size: 1.25rem; font-weight: 700;">Create New Task</h3>
-                                <button onclick="toggleModal('addTaskModal')" style="background: none; border: none; cursor: pointer; color: var(--text-muted);"><i data-lucide="x"></i></button>
+                                <h3 style="font-size: 1.25rem; font-weight: 700;">Assign Aid Request</h3>
+                                <button onclick="toggleModal('assignRequestModal')" style="background: none; border: none; cursor: pointer;"><i data-lucide="x"></i></button>
                             </div>
                             <form method="POST">
-                                <input type="hidden" name="action" value="assign_task">
-                                <div class="form-group"><label>Task Title</label><input type="text" name="task_name" class="form-control" placeholder="e.g. Distribute meal packets" required></div>
-                                <div class="form-group"><label>Description</label><textarea name="description" class="form-control" style="min-height: 80px;" placeholder="Detailed instructions..."></textarea></div>
-                                <div class="form-grid">
-                                    <div class="form-group">
-                                        <label>Priority</label>
-                                        <select name="priority" class="form-control">
-                                            <option value="low">Low</option>
-                                            <option value="medium" selected>Medium</option>
-                                            <option value="high">High</option>
-                                            <option value="urgent">Urgent</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group"><label>Due Date</label><input type="date" name="due_date" class="form-control" required></div>
+                                <input type="hidden" name="action" value="create_task_from_request">
+                                <input type="hidden" name="request_id" id="assign_req_id">
+                                <div class="form-group">
+                                    <label>Task Title</label>
+                                    <input type="text" name="task_name" id="assign_task_name" class="form-control" required>
                                 </div>
                                 <div class="form-group">
-                                    <label>Assign To Volunteer</label>
+                                    <label>Volunteer</label>
                                     <select name="volunteer_id" class="form-control" required>
-                                        <option value="0">Unassigned</option>
-                                        <?php foreach ($volunteers as $vol): ?>
-                                            <option value="<?php echo $vol['id']; ?>"><?php echo htmlspecialchars($vol['full_name']); ?></option>
+                                        <option value="">Select a volunteer</option>
+                                        <?php foreach ($volunteers as $v): ?>
+                                            <option value="<?php echo $v['id']; ?>"><?php echo htmlspecialchars($v['full_name']); ?></option>
                                         <?php endforeach; ?>
                                     </select>
                                 </div>
-                                <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px; background: #0f172a; margin-top: 1rem;">Create Task</button>
+                                <div class="form-group">
+                                    <label>Priority</label>
+                                    <select name="priority" id="assign_priority" class="form-control">
+                                        <option value="low">Low</option>
+                                        <option value="medium">Medium</option>
+                                        <option value="high">High</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Instructions for Volunteer</label>
+                                    <textarea name="description" id="assign_desc" class="form-control" style="min-height: 100px;"></textarea>
+                                </div>
+                                <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px; margin-top: 1rem;">Assign Task</button>
                             </form>
                         </div>
                     </div>
+
+                    <!-- Add Manual Task Modal -->
+                    <div id="addTaskModal" class="modal">
+                        <div class="modal-content">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                                <h3 style="font-size: 1.25rem; font-weight: 700;">Create Manual Task</h3>
+                                <button onclick="toggleModal('addTaskModal')" style="background: none; border: none; cursor: pointer;"><i data-lucide="x"></i></button>
+                            </div>
+                            <form method="POST">
+                                <input type="hidden" name="action" value="assign_task">
+                                <div class="form-group"><label>Task Name</label><input type="text" name="task_name" class="form-control" placeholder="e.g. Unload truck, Check Section B" required></div>
+                                <div class="form-group">
+                                    <label>Assign To</label>
+                                    <select name="volunteer_id" class="form-control" required>
+                                        <?php foreach ($volunteers as $v): ?>
+                                            <option value="<?php echo $v['id']; ?>"><?php echo htmlspecialchars($v['full_name']); ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="form-group"><label>Priority</label><select name="priority" class="form-control"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
+                                <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px; margin-top: 1rem;">Create Task</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <script>
+                    function openAssignModal(req) {
+                        document.getElementById('assign_req_id').value = req.id;
+                        document.getElementById('assign_task_name').value = "Aid Request: " + req.category;
+                        document.getElementById('assign_desc').value = "Request from " + req.requester_name + ":\n" + req.description + "\n\nContact: " + (req.contact || 'N/A');
+                        document.getElementById('assign_priority').value = req.urgency.toLowerCase();
+                        toggleModal('assignRequestModal');
+                    }
+                    </script>
 
                 <?php elseif ($page === 'distribution'): ?>
                     <div class="panel" style="padding: 4rem; text-align: center; border-style: dashed; background: transparent; opacity: 0.5;">
                         <i data-lucide="truck" style="width: 48px; color: var(--text-muted); margin-bottom: 1rem;"></i>
                         <h3>Aid Distribution</h3>
-                        <p style="color: var(--text-muted);">This module is currently empty and will be updated later.</p>
                     </div>
 
                 <?php elseif ($page === 'report'): ?>
-
-
                     <div class="panel" style="padding: 4rem; text-align: center; border-style: dashed; background: transparent; opacity: 0.5;">
                         <i data-lucide="file-text" style="width: 48px; color: var(--text-muted); margin-bottom: 1rem;"></i>
                         <h3>Reports</h3>
