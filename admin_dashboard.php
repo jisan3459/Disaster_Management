@@ -199,105 +199,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error_msg = "Failed to remove task.";
             }
         }
-
-        if ($action === 'approve_donation') {
-            $donation_id = intval($_POST['donation_id']);
-            $target_camp_id = isset($_POST['camp_id']) ? intval($_POST['camp_id']) : 0;
-
-            $don_query = $conn->query("SELECT * FROM donations WHERE id = $donation_id");
-            if ($don_query && $don_query->num_rows > 0) {
-                $donation = $don_query->fetch_assoc();
-                
-                if ($donation['status'] === 'completed') {
-                    $error_msg = "This donation has already been approved.";
-                } else {
-                    $update = $conn->query("UPDATE donations SET status = 'completed' WHERE id = $donation_id");
-                    if ($update) {
-                        $success_msg = "Donation approved successfully!";
-
-                        if ($target_camp_id > 0 && $target_camp_id !== intval($donation['camp_id'])) {
-                            $conn->query("UPDATE donations SET camp_id = $target_camp_id WHERE id = $donation_id");
-                            $donation['camp_id'] = $target_camp_id;
-                        }
-
-                        $final_camp_id = intval($donation['camp_id']);
-                        if ($final_camp_id <= 0) {
-                            $def_camp_q = $conn->query("SELECT id FROM camps LIMIT 1");
-                            if ($def_camp_q && $def_camp_q->num_rows > 0) {
-                                $final_camp_id = intval($def_camp_q->fetch_assoc()['id']);
-                                $conn->query("UPDATE donations SET camp_id = $final_camp_id WHERE id = $donation_id");
-                            }
-                        }
-
-                        if ($donation['donation_type'] === 'supplies') {
-                            $item_name = sanitize($donation['item_name'] ?: 'Supplies');
-                            $amount = floatval($donation['amount']);
-                            
-                            $item_lower = strtolower($item_name);
-                            $category = 'Supplies';
-                            if (strpos($item_lower, 'food') !== false || strpos($item_lower, 'rice') !== false || strpos($item_lower, 'lentil') !== false || strpos($item_lower, 'oil') !== false || strpos($item_lower, 'dry') !== false || strpos($item_lower, 'biscuit') !== false) {
-                                $category = 'Food';
-                            } elseif (strpos($item_lower, 'water') !== false || strpos($item_lower, 'drink') !== false || strpos($item_lower, 'juice') !== false) {
-                                $category = 'Water';
-                            } elseif (strpos($item_lower, 'medicine') !== false || strpos($item_lower, 'first aid') !== false || strpos($item_lower, 'saline') !== false || strpos($item_lower, 'surgical') !== false || strpos($item_lower, 'mask') !== false || strpos($item_lower, 'sanitizer') !== false) {
-                                $category = 'Medical';
-                            } elseif (strpos($item_lower, 'blanket') !== false || strpos($item_lower, 'cloth') !== false || strpos($item_lower, 'shirt') !== false || strpos($item_lower, 'tent') !== false || strpos($item_lower, 'pillow') !== false) {
-                                $category = 'Clothing & Shelter';
-                            }
-
-                            $unit = 'pcs';
-                            if (strpos($item_lower, 'box') !== false || strpos($item_lower, 'carton') !== false) {
-                                $unit = 'boxes';
-                            } elseif (strpos($item_lower, 'kg') !== false || strpos($item_lower, 'kilogram') !== false) {
-                                $unit = 'kg';
-                            } elseif (strpos($item_lower, 'liter') !== false || strpos($item_lower, 'litre') !== false || strpos($item_lower, 'ml') !== false) {
-                                $unit = 'liters';
-                            } elseif (strpos($item_lower, 'packet') !== false || strpos($item_lower, 'pkg') !== false) {
-                                $unit = 'packets';
-                            } elseif (strpos($item_lower, 'bottle') !== false) {
-                                $unit = 'bottles';
-                            }
-
-                            if ($final_camp_id > 0) {
-                                $check_inv = $conn->query("SELECT id, quantity FROM inventory WHERE camp_id = $final_camp_id AND LOWER(item_name) = LOWER('$item_name')");
-                                if ($check_inv && $check_inv->num_rows > 0) {
-                                    $inv_row = $check_inv->fetch_assoc();
-                                    $new_qty = floatval($inv_row['quantity']) + $amount;
-                                    $inv_id = $inv_row['id'];
-                                    
-                                    $status = ($new_qty >= 50) ? 'In Stock' : (($new_qty > 0) ? 'Limited' : 'Out of Stock');
-                                    
-                                    $conn->query("UPDATE inventory SET quantity = $new_qty, status = '$status' WHERE id = $inv_id");
-                                } else {
-                                    $status = ($amount >= 50) ? 'In Stock' : (($amount > 0) ? 'Limited' : 'Out of Stock');
-                                    $conn->query("INSERT INTO inventory (camp_id, item_name, category, quantity, unit, status) VALUES ($final_camp_id, '$item_name', '$category', $amount, '$unit', '$status')");
-                                }
-                            }
-                        }
-
-                        if ($donation['donation_type'] === 'money' && intval($donation['campaign_id']) > 0) {
-                            $campaign_id = intval($donation['campaign_id']);
-                            $amount = floatval($donation['amount']);
-                            $conn->query("UPDATE campaigns SET raised_amount = raised_amount + $amount WHERE id = $campaign_id");
-                        }
-                    } else {
-                        $error_msg = "Failed to update donation status: " . $conn->error;
-                    }
-                }
-            } else {
-                $error_msg = "Donation record not found.";
-            }
-        }
-
-        if ($action === 'reject_donation') {
-            $donation_id = intval($_POST['donation_id']);
-            $update = $conn->query("UPDATE donations SET status = 'failed' WHERE id = $donation_id");
-            if ($update) {
-                $success_msg = "Donation has been marked as rejected/failed.";
-            } else {
-                $error_msg = "Failed to reject donation: " . $conn->error;
-            }
-        }
     }
 }
 
@@ -383,11 +284,10 @@ if ($page === 'tasks') {
 $donations_list = [];
 if ($page === 'donations') {
     $donations_res = $conn->query("
-        SELECT d.*, u.full_name as donor_name, u.email as donor_email, u.phone as donor_phone, c.campaign_name, camp.camp_name 
+        SELECT d.*, u.full_name as donor_name, c.campaign_name 
         FROM donations d 
         LEFT JOIN users u ON d.donor_id = u.id 
         LEFT JOIN campaigns c ON d.campaign_id = c.id 
-        LEFT JOIN camps camp ON d.camp_id = camp.id 
         ORDER BY d.created_at DESC
     ");
     if ($donations_res) {
@@ -923,15 +823,7 @@ if ($page === 'inventory') {
                                                 </div>
                                             </td>
                                             <td><?php echo htmlspecialchars($donation['campaign_name'] ?? 'General Fund'); ?></td>
-                                            <td style="font-weight:700; color:#111827;">
-                                                <?php 
-                                                if (($donation['donation_type'] ?? 'money') === 'money') {
-                                                    echo '৳' . number_format($donation['amount'], 2);
-                                                } else {
-                                                    echo number_format($donation['amount'], 0) . ' ' . htmlspecialchars($donation['item_name'] ?: 'Items');
-                                                }
-                                                ?>
-                                            </td>
+                                            <td style="font-weight:700; color:#111827;">৳<?php echo number_format($donation['amount'], 2); ?></td>
                                             <td><span class="badge" style="background:#f3f4f6; color:#4b5563;"><?php echo ucfirst($donation['donation_type']); ?></span></td>
                                             <td>
                                                 <span class="badge <?php echo $donation['status'] === 'completed' ? 'active' : ($donation['status'] === 'pending' ? 'inactive' : 'btn-danger'); ?>" style="<?php echo $donation['status'] === 'failed' ? 'background:#fef2f2; color:#ef4444;' : ''; ?>">
@@ -940,21 +832,8 @@ if ($page === 'inventory') {
                                             </td>
                                             <td><code style="font-size:0.85rem; color:#6b7280;"><?php echo htmlspecialchars($donation['transaction_id'] ?: 'N/A'); ?></code></td>
                                             <td><?php echo date('M d, Y', strtotime($donation['created_at'])); ?></td>
-                                            <td class="table-actions" style="white-space: nowrap; display: flex; gap: 0.35rem; align-items: center; min-height: 48px;">
-                                                <button type="button" class="btn-secondary" style="padding:0.4rem 0.8rem;" onclick='openDonationDetailsModal(<?php echo json_encode($donation, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>)'>View</button>
-                                                <?php if ($donation['status'] === 'pending'): ?>
-                                                    <form method="POST" style="display:inline; margin:0;">
-                                                        <input type="hidden" name="action" value="approve_donation">
-                                                        <input type="hidden" name="donation_id" value="<?php echo $donation['id']; ?>">
-                                                        <input type="hidden" name="camp_id" value="<?php echo intval($donation['camp_id'] ?: 0); ?>">
-                                                        <button type="submit" class="btn-primary" style="padding:0.4rem 0.8rem; background:#22c55e; color:white; border:none;" onclick="return confirm('Are you sure you want to approve this donation?');">Approve</button>
-                                                    </form>
-                                                    <form method="POST" style="display:inline; margin:0;">
-                                                        <input type="hidden" name="action" value="reject_donation">
-                                                        <input type="hidden" name="donation_id" value="<?php echo $donation['id']; ?>">
-                                                        <button type="submit" class="btn-danger" style="padding:0.4rem 0.8rem; border:none;" onclick="return confirm('Are you sure you want to reject this donation?');">Reject</button>
-                                                    </form>
-                                                <?php endif; ?>
+                                            <td class="table-actions">
+                                                <button class="btn-secondary" style="padding:0.4rem 0.8rem;" onclick="alert('Viewing details for <?php echo $donation['transaction_id']; ?>')">View</button>
                                             </td>
                                         </tr>
                                     <?php endforeach; ?>
