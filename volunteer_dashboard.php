@@ -25,6 +25,13 @@ $notifications_query = $conn->query("SELECT COUNT(*) as count FROM notifications
 $notifications = $notifications_query->fetch_assoc();
 $unread_count = $notifications['count'];
 
+// API Endpoint for Notifications
+if (isset($_GET['api']) && $_GET['api'] === 'check_notifications') {
+    header('Content-Type: application/json');
+    echo json_encode(['count' => $unread_count]);
+    exit();
+}
+
 // Get task statistics
 $task_stats = $conn->query("SELECT 
     COUNT(*) as total,
@@ -46,6 +53,19 @@ $camp = $camp_query ? $camp_query->fetch_assoc() : null;
 $camp_name = $camp ? $camp['camp_name'] : 'Not Assigned';
 $camp_id = $camp ? $camp['id'] : null;
 
+// Fetch inventory for distribution tasks
+$inventory_items = [];
+if (!empty($camp_id)) {
+    $inv_query = $conn->query("SELECT * FROM inventory WHERE camp_id = " . intval($camp_id) . " AND quantity > 0");
+    if ($inv_query) {
+        while ($row = $inv_query->fetch_assoc()) {
+            $inventory_items[] = $row;
+        }
+    }
+}
+
+
+
 // Handle task status updates
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'update_task_status') {
@@ -55,6 +75,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         // Validate status
         $valid_statuses = ['pending', 'in_progress', 'completed'];
         if (in_array($new_status, $valid_statuses)) {
+            // Check if it was a distribution task before updating to 'completed'
+            if ($new_status === 'completed') {
+                $task_check = $conn->query("SELECT * FROM tasks WHERE id = $task_id AND assigned_to = $user_id");
+                $task_data = $task_check->fetch_assoc();
+                
+                if ($task_data && $task_data['task_type'] === 'distribution') {
+                    $recipient = 'Affected Resident'; 
+                    $item = $task_data['distribution_item'];
+                    $qty = $task_data['distribution_qty'];
+                    $camp_id_task = $task_data['camp_id'];
+                    
+                    // Update inventory
+                    $conn->query("UPDATE inventory SET 
+                        quantity = quantity - $qty,
+                        status = CASE 
+                            WHEN quantity - $qty <= 0 THEN 'Out of Stock'
+                            WHEN quantity - $qty < 10 THEN 'Limited'
+                            ELSE 'In Stock'
+                        END
+                        WHERE camp_id = $camp_id_task AND item_name = '$item'");
+
+                    // Log distribution
+                    $conn->query("INSERT INTO distributions (camp_id, recipient_name, items, quantity, distributed_by) VALUES ($camp_id_task, '$recipient', '$item', $qty, $user_id)");
+                }
+
+            }
+
             $completed_date_clause = ($new_status === 'completed') ? ", completed_date = NOW()" : "";
             $stmt = $conn->prepare("UPDATE tasks SET status = ?$completed_date_clause WHERE id = ? AND assigned_to = ?");
             $stmt->bind_param("sii", $new_status, $task_id, $user_id);
@@ -89,17 +136,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $priority = sanitize($_POST['priority']);
         $due_date = sanitize($_POST['due_date']);
         $assignment_type = sanitize($_POST['assignment_type']);
+        $task_type = sanitize($_POST['task_type'] ?? 'standard');
+        $dist_item = sanitize($_POST['distribution_item'] ?? '');
+        $dist_qty = floatval($_POST['distribution_qty'] ?? 0);
         
         // If normal, assigned_to is NULL, otherwise it's the current user
         $assignee = ($assignment_type === 'self') ? $user_id : null;
         
-        $stmt = $conn->prepare("INSERT INTO tasks (task_name, description, camp_id, assigned_to, assigned_by, priority, due_date) VALUES (?, ?, ?, ?, ?, ?, ?)");
-        $stmt->bind_param("ssiiiss", $task_name, $description, $camp_id, $assignee, $user_id, $priority, $due_date);
+        $stmt = $conn->prepare("INSERT INTO tasks (task_name, description, camp_id, assigned_to, assigned_by, priority, due_date, task_type, distribution_item, distribution_qty) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param("ssiiissssd", $task_name, $description, $camp_id, $assignee, $user_id, $priority, $due_date, $task_type, $dist_item, $dist_qty);
         
         if ($stmt->execute()) {
             $_SESSION['success_msg'] = "Task created successfully!";
             header("Location: volunteer_dashboard.php?page=tasks");
             exit();
+
         } else {
             $error_msg = "Error creating task: " . $conn->error;
         }
@@ -887,14 +938,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         .modal-content {
             background: white;
             width: 90%;
-            max-width: 550px;
-            border-radius: 24px;
-            padding: 2.5rem;
+            max-width: 480px;
+            border-radius: 20px;
+            padding: 1.8rem;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
             position: relative;
             transform: scale(0.9);
             transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
+
 
         .modal-overlay.active .modal-content {
             transform: scale(1);
@@ -1098,11 +1150,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             <?php while ($task = $pending_tasks->fetch_assoc()): ?>
                                 <div class="task-card">
                                     <div class="task-title"><?php echo htmlspecialchars($task['task_name']); ?></div>
-                                    <div class="task-description"><?php echo htmlspecialchars(substr($task['description'], 0, 80)) . '...'; ?></div>
+                                    <div class="task-description"><?php echo htmlspecialchars(substr($task['description'] ?? '', 0, 80)) . '...'; ?></div>
+
                                     <div class="task-meta">
                                         <span>📍 <?php echo htmlspecialchars($camp_name); ?></span>
                                         <span class="priority-badge priority-<?php echo strtolower($task['priority']); ?>"><?php echo strtoupper($task['priority']); ?></span>
                                     </div>
+                                    <?php if ($task['task_type'] === 'distribution'): ?>
+                                        <div style="margin-top: 0.8rem; padding: 0.5rem; background: #eff6ff; border-radius: 6px; border-left: 3px solid #3b82f6;">
+                                            <p style="font-size: 0.75rem; font-weight: 700; color: #1e40af; margin-bottom: 2px;">📦 DISTRIBUTION TASK</p>
+                                            <p style="font-size: 0.85rem; color: #334155;"><?php echo htmlspecialchars($task['distribution_item']); ?> (<?php echo $task['distribution_qty']; ?>)</p>
+                                        </div>
+                                    <?php endif; ?>
                                     <div style="margin-top: 1rem; font-size: 0.8rem; color: #3b82f6; font-weight: 600;">
                                         Manage in "My Tasks" section
                                     </div>
@@ -1125,7 +1184,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             <?php while ($task = $progress_tasks->fetch_assoc()): ?>
                                 <div class="task-card">
                                     <div class="task-title"><?php echo htmlspecialchars($task['task_name']); ?></div>
-                                    <div class="task-description"><?php echo htmlspecialchars(substr($task['description'], 0, 80)) . '...'; ?></div>
+                                    <div class="task-description"><?php echo htmlspecialchars(substr($task['description'] ?? '', 0, 80)) . '...'; ?></div>
+
                                     <div class="task-meta">
                                         <span>📍 <?php echo htmlspecialchars($camp_name); ?></span>
                                         <span class="priority-badge priority-<?php echo strtolower($task['priority']); ?>"><?php echo strtoupper($task['priority']); ?></span>
@@ -1152,7 +1212,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             <?php while ($task = $completed_tasks->fetch_assoc()): ?>
                                 <div class="task-card">
                                     <div class="task-title"><?php echo htmlspecialchars($task['task_name']); ?></div>
-                                    <div class="task-description"><?php echo htmlspecialchars(substr($task['description'], 0, 80)) . '...'; ?></div>
+                                    <div class="task-description"><?php echo htmlspecialchars(substr($task['description'] ?? '', 0, 80)) . '...'; ?></div>
+
                                     <div class="task-meta">
                                         <span>📍 <?php echo htmlspecialchars($camp_name); ?></span>
                                         <span class="priority-badge priority-<?php echo strtolower($task['priority']); ?>"><?php echo strtoupper($task['priority']); ?></span>
@@ -1226,10 +1287,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                                             ?>
                                         "><?php echo ucfirst(str_replace('_', ' ', $task['status'])); ?></span>
                                     </div>
-                                    <div class="task-item-description"><?php echo htmlspecialchars($task['description']); ?></div>
+                                    <div class="task-item-description"><?php echo htmlspecialchars($task['description'] ?? ''); ?></div>
+
                                     <div class="task-item-meta">
                                         <span>📍 <?php echo htmlspecialchars($camp_name); ?></span>
-                                        <span>📅 <?php echo date('d M, h:i A', strtotime($task['due_date'])); ?></span>
+                                        <span>📅 <?php echo $task['due_date'] ? date('d M, h:i A', strtotime($task['due_date'])) : 'No due date'; ?></span>
+
                                         <span>👤 Assigned by: <?php echo htmlspecialchars($task['manager_name'] ?: 'System'); ?></span>
                                     </div>
                                 </div>
@@ -1241,7 +1304,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                                     <?php else: ?>
                                         <button class="btn btn-secondary" disabled>✓ Completed</button>
                                     <?php endif; ?>
-                                    <button class="btn btn-secondary" onclick="showTaskDetails('<?php echo addslashes($task['task_name']); ?>', '<?php echo addslashes($task['description']); ?>', '<?php echo strtoupper($task['priority']); ?>', '<?php echo ucfirst($task['status']); ?>', '<?php echo addslashes($task['manager_name'] ?: 'System'); ?>')">View Details</button>
+                                    <button class="btn btn-secondary" onclick="showTaskDetails('<?php echo addslashes($task['task_name'] ?? ''); ?>', '<?php echo addslashes($task['description'] ?? ''); ?>', '<?php echo strtoupper($task['priority'] ?? 'MEDIUM'); ?>', '<?php echo ucfirst($task['status'] ?? 'pending'); ?>', '<?php echo addslashes($task['manager_name'] ?? 'System'); ?>', '<?php echo $task['task_type'] ?? 'standard'; ?>', '<?php echo addslashes($task['distribution_item'] ?? ''); ?>', '<?php echo $task['distribution_qty'] ?? 0; ?>')">View Details</button>
+
+
                                 </div>
                             </div>
                         <?php endwhile; ?>
@@ -1362,28 +1427,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <tr style="border-bottom: 1px solid #f1f5f9;">
-                                        <td style="padding: 1rem;">May 04, 2026</td>
-                                        <td style="padding: 1rem; font-weight: 500;">Food Packets</td>
-                                        <td style="padding: 1rem;">25 units</td>
-                                        <td style="padding: 1rem;">Section A</td>
-                                        <td style="padding: 1rem;"><span style="background: #dcfce7; color: #15803d; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.85rem;">Delivered</span></td>
-                                    </tr>
-                                    <tr style="border-bottom: 1px solid #f1f5f9;">
-                                        <td style="padding: 1rem;">May 03, 2026</td>
-                                        <td style="padding: 1rem; font-weight: 500;">Water Bottles</td>
-                                        <td style="padding: 1rem;">100 units</td>
-                                        <td style="padding: 1rem;">Section B</td>
-                                        <td style="padding: 1rem;"><span style="background: #dcfce7; color: #15803d; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.85rem;">Delivered</span></td>
-                                    </tr>
-                                    <tr style="border-bottom: 1px solid #f1f5f9;">
-                                        <td style="padding: 1rem;">May 02, 2026</td>
-                                        <td style="padding: 1rem; font-weight: 500;">Medical Kits</td>
-                                        <td style="padding: 1rem;">10 units</td>
-                                        <td style="padding: 1rem;">Medical Tent</td>
-                                        <td style="padding: 1rem;"><span style="background: #dcfce7; color: #15803d; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.85rem;">Delivered</span></td>
-                                    </tr>
+                                    <?php
+                                    $dist_history = $conn->query("SELECT * FROM distributions WHERE distributed_by = $user_id ORDER BY distributed_at DESC");
+                                    if ($dist_history->num_rows === 0):
+                                    ?>
+                                        <tr>
+                                            <td colspan="5" style="padding: 3rem; text-align: center; color: #94a3b8;">
+                                                <div style="font-size: 2.5rem; margin-bottom: 1rem;">📦</div>
+                                                No supplies delivered yet.
+                                            </td>
+                                        </tr>
+                                    <?php else: ?>
+                                        <?php while ($row = $dist_history->fetch_assoc()): ?>
+                                            <tr style="border-bottom: 1px solid #f1f5f9;">
+                                                <td style="padding: 1rem;"><?php echo date('M d, Y', strtotime($row['distributed_at'])); ?></td>
+                                                <td style="padding: 1rem; font-weight: 500;"><?php echo htmlspecialchars($row['items']); ?></td>
+                                                <td style="padding: 1rem;"><?php echo $row['quantity']; ?> units</td>
+                                                <td style="padding: 1rem;"><?php echo htmlspecialchars($row['recipient_name']); ?></td>
+                                                <td style="padding: 1rem;"><span style="background: #dcfce7; color: #15803d; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.85rem;">Delivered</span></td>
+                                            </tr>
+                                        <?php endwhile; ?>
+                                    <?php endif; ?>
                                 </tbody>
+
                             </table>
                         </div>
                     </div>
@@ -1452,7 +1518,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         <!-- Chat List -->
                         <div class="chat-list">
                             <div class="chat-item active">
-                                <div class="chat-item-name">Rajesh Kumar</div>
+                                <div class="chat-item-name">Karim Ahmed</div>
                                 <div class="chat-item-status">🟢 Online - Camp Manager</div>
                             </div>
                         </div>
@@ -1462,7 +1528,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             <!-- Messages -->
                             <div class="chat-messages">
                                 <div class="message">
-                                    <div class="message-avatar">RK</div>
+                                    <div class="message-avatar">KA</div>
                                     <div class="message-content">
                                         <div class="message-text">Great work on today's distribution!</div>
                                         <div class="message-time">11:00 AM</div>
@@ -1470,7 +1536,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                                 </div>
 
                                 <div class="message">
-                                    <div class="message-avatar">RK</div>
+                                    <div class="message-avatar">KA</div>
                                     <div class="message-content">
                                         <div class="message-text">I have a new task for you</div>
                                         <div class="message-time">11:10 AM</div>
@@ -1615,12 +1681,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             document.getElementById('volProfileMenu').classList.toggle('show');
         }
 
-        function showTaskDetails(title, description, priority, status, manager) {
+        function showTaskDetails(title, description, priority, status, manager, taskType, distItem, distQty) {
+
             document.getElementById('modalTitle').innerText = title;
             document.getElementById('modalDesc').innerText = description;
             document.getElementById('modalPriority').innerText = priority;
             document.getElementById('modalStatus').innerText = status;
             document.getElementById('modalManager').innerText = manager;
+            
+            if (taskType === 'distribution') {
+                document.getElementById('modalDistInfo').style.display = 'block';
+                document.getElementById('modalItem').innerText = distItem;
+                document.getElementById('modalQty').innerText = distQty;
+            } else {
+                document.getElementById('modalDistInfo').style.display = 'none';
+            }
+
             
             const overlay = document.getElementById('taskDetailsModal');
             overlay.classList.add('active');
@@ -1633,7 +1709,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         function openCreateTaskModal() {
             document.getElementById('createTaskModal').classList.add('active');
+            // Reset fields
+            document.getElementById('task_type').value = 'standard';
+            toggleTaskFields();
         }
+
+        function toggleTaskFields() {
+            const taskType = document.getElementById('task_type').value;
+            const distFields = document.getElementById('distribution_fields');
+            if (taskType === 'distribution') {
+                distFields.style.display = 'block';
+                distFields.querySelectorAll('select, input').forEach(el => el.required = true);
+            } else {
+                distFields.style.display = 'none';
+                distFields.querySelectorAll('select, input').forEach(el => el.required = false);
+            }
+        }
+
 
         document.addEventListener('click', function(event) {
             const menu = document.getElementById('volProfileMenu');
@@ -1674,6 +1766,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         <span id="modalManager">Manager Name</span>
                     </div>
                 </div>
+
+                <div id="modalDistInfo" style="display: none; margin-top: 1.5rem; padding: 1rem; background: #f0f9ff; border-radius: 12px; border: 1px solid #bae6fd;">
+                    <p style="font-size: 0.75rem; font-weight: 700; color: #0369a1; text-transform: uppercase; margin-bottom: 0.5rem;">📦 Distribution Details</p>
+                    <div style="display: flex; gap: 2rem;">
+                        <div class="modal-info-item">
+                            <label>Item</label>
+                            <span id="modalItem">Food</span>
+                        </div>
+                        <div class="modal-info-item">
+                            <label>Quantity</label>
+                            <span id="modalQty">10</span>
+                        </div>
+                    </div>
+                </div>
+
             </div>
             <div style="margin-top: 2rem; display: flex; justify-content: flex-end;">
                 <button class="btn btn-primary" onclick="closeModal()" style="padding: 0.8rem 2rem; border-radius: 12px; background: #2563eb;">Got it</button>
@@ -1697,13 +1804,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         <input type="text" name="task_name" placeholder="e.g. Clean distribution area" required style="padding: 0.8rem; border-radius: 10px;">
                     </div>
 
-                    <div class="form-group">
-                        <label>Assignment Type <span class="required">*</span></label>
-                        <select name="assignment_type" required style="padding: 0.8rem; border-radius: 10px;">
-                            <option value="self">Self-Assign (Assign to me)</option>
-                            <option value="normal">Normal Task (Unassigned/Pool)</option>
-                        </select>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+                        <div class="form-group">
+                            <label>Assignment Type <span class="required">*</span></label>
+                            <select name="assignment_type" required style="padding: 0.8rem; border-radius: 10px;">
+                                <option value="self">Self-Assign (Assign to me)</option>
+                                <option value="normal">Normal Task (Unassigned/Pool)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Task Type <span class="required">*</span></label>
+                            <select name="task_type" id="task_type" onchange="toggleTaskFields()" required style="padding: 0.8rem; border-radius: 10px;">
+                                <option value="standard">Standard Task</option>
+                                <option value="distribution">Aid Distribution</option>
+                            </select>
+                        </div>
                     </div>
+
+                    <!-- Distribution Specific Fields -->
+                    <div id="distribution_fields" style="display: none; background: #f8fafc; padding: 1.5rem; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 1.5rem;">
+                        <h4 style="font-size: 0.85rem; color: #3b82f6; text-transform: uppercase; margin-bottom: 1rem; font-weight: 700;">Distribution Details</h4>
+                        <div class="form-group">
+                            <label>Select Aid Item <span class="required">*</span></label>
+                            <select name="distribution_item" style="padding: 0.8rem; border-radius: 10px;">
+                                <?php if (empty($inventory_items)): ?>
+                                    <option value="">-- No items available in inventory --</option>
+                                <?php else: ?>
+                                    <option value="">-- Select Item --</option>
+                                    <?php foreach ($inventory_items as $item): ?>
+                                        <option value="<?php echo htmlspecialchars($item['item_name']); ?>"><?php echo htmlspecialchars($item['item_name']); ?> (Available: <?php echo $item['quantity']; ?> <?php echo $item['unit']; ?>)</option>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </select>
+
+                        </div>
+                        <div class="form-group">
+                            <label>Amount / Quantity <span class="required">*</span></label>
+                            <input type="number" name="distribution_qty" step="0.01" placeholder="Enter amount" style="padding: 0.8rem; border-radius: 10px;">
+                        </div>
+                    </div>
+
 
                     <div class="form-group">
                         <label>Description</label>
@@ -1735,6 +1875,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         </div>
     </div>
 
+    <script>
+        // Real-time-ish check for new tasks/notifications
+        let lastNotificationCount = <?php echo $unread_count; ?>;
+        setInterval(() => {
+            fetch('volunteer_dashboard.php?api=check_notifications')
+                .then(res => res.json())
+                .then(data => {
+                    if (data.count > lastNotificationCount) {
+                        const bell = document.querySelector('.notification-badge');
+                        if (bell) {
+                            bell.innerText = data.count;
+                            bell.style.display = 'flex';
+                        } else {
+                            const bellIcon = document.querySelector('.notification-bell');
+                            if (bellIcon) {
+                                bellIcon.innerHTML += `<span class="notification-badge">${data.count}</span>`;
+                            }
+                        }
+                        lastNotificationCount = data.count;
+                        
+                        if (window.Notification && Notification.permission === "granted") {
+                            new Notification("New Task Assigned", { body: "You have received a new assignment from the Camp Manager." });
+                        }
+                    }
+                });
+        }, 5000);
+
+        if (window.Notification && Notification.permission !== "denied") {
+            Notification.requestPermission();
+        }
+
+        function toggleProfileMenu() {
+            const menu = document.getElementById('volProfileMenu');
+            if (menu) menu.classList.toggle('show');
+        }
+    </script>
 </body>
 </html>
 <?php
