@@ -22,7 +22,9 @@ $tables = array(
         profile_image VARCHAR(255),
         location VARCHAR(255),
         skills TEXT,
+        availability VARCHAR(100),
         status ENUM('active', 'inactive', 'blocked') DEFAULT 'active',
+        last_login TIMESTAMP NULL DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )",
@@ -67,13 +69,30 @@ $tables = array(
         assigned_to INT,
         assigned_by INT,
         priority ENUM('low', 'medium', 'high') DEFAULT 'medium',
+        task_type ENUM('standard', 'distribution') DEFAULT 'standard',
+        distribution_item VARCHAR(255),
+        distribution_qty FLOAT DEFAULT 0,
         status ENUM('pending', 'in_progress', 'completed') DEFAULT 'pending',
         due_date DATETIME,
         completed_date DATETIME,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (camp_id) REFERENCES camps(id),
         FOREIGN KEY (assigned_to) REFERENCES users(id),
         FOREIGN KEY (assigned_by) REFERENCES users(id)
+    )",
+
+    // Distributions Table
+    "CREATE TABLE IF NOT EXISTS distributions (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        camp_id INT,
+        recipient_name VARCHAR(255) NOT NULL,
+        items TEXT NOT NULL,
+        quantity FLOAT DEFAULT 1.0,
+        distributed_by INT,
+        distributed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (camp_id) REFERENCES camps(id),
+        FOREIGN KEY (distributed_by) REFERENCES users(id)
     )",
 
     // Donations Table
@@ -81,14 +100,21 @@ $tables = array(
         id INT PRIMARY KEY AUTO_INCREMENT,
         donor_id INT,
         campaign_id INT,
+        camp_id INT NULL DEFAULT NULL,
         amount DECIMAL(10, 2),
         donation_type ENUM('money', 'supplies', 'other') DEFAULT 'money',
         status ENUM('pending', 'completed', 'failed') DEFAULT 'pending',
         payment_method VARCHAR(100),
         transaction_id VARCHAR(255),
+        pickup_address TEXT NULL DEFAULT NULL,
+        pickup_phone VARCHAR(20) NULL DEFAULT NULL,
+        supply_delivery_method VARCHAR(50) NULL DEFAULT NULL,
+        message TEXT NULL DEFAULT NULL,
+        item_name VARCHAR(255) NULL DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (donor_id) REFERENCES users(id),
-        FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+        FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
+        FOREIGN KEY (camp_id) REFERENCES camps(id) ON DELETE SET NULL
     )",
 
     // Messages/Chat Table
@@ -161,14 +187,17 @@ $tables = array(
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (camp_id) REFERENCES camps(id)
     )",
+    // Inventory Table
     "CREATE TABLE IF NOT EXISTS inventory (
         id INT PRIMARY KEY AUTO_INCREMENT,
         camp_id INT,
         item_name VARCHAR(255) NOT NULL,
         category VARCHAR(100),
         quantity DECIMAL(10, 2) DEFAULT 0.00,
-        unit VARCHAR(50),
+        min_threshold FLOAT DEFAULT 50.0,
+        unit VARCHAR(50) DEFAULT 'units',
         status ENUM('In Stock', 'Limited', 'Out of Stock') DEFAULT 'In Stock',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (camp_id) REFERENCES camps(id)
     )",
@@ -182,6 +211,46 @@ $tables = array(
         location VARCHAR(255),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id)
+    )",
+
+    // Affected Persons Table
+    "CREATE TABLE IF NOT EXISTS affected_persons (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        full_name VARCHAR(255) NOT NULL,
+        location VARCHAR(255) NOT NULL,
+        family_members INT NOT NULL DEFAULT 1,
+        needs TEXT,
+        access_key VARCHAR(255) NOT NULL,
+        registration_status ENUM('pending', 'assigned', 'completed', 'rejected') DEFAULT 'pending',
+        camp_id INT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (camp_id) REFERENCES camps(id) ON DELETE SET NULL
+    )",
+
+    // Affected Help Requests Table
+    "CREATE TABLE IF NOT EXISTS affected_help_requests (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        affected_id INT NOT NULL,
+        category VARCHAR(100) NOT NULL,
+        urgency ENUM('low', 'medium', 'high', 'critical') DEFAULT 'medium',
+        description TEXT,
+        contact VARCHAR(255),
+        status ENUM('pending', 'in_progress', 'resolved') DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (affected_id) REFERENCES affected_persons(id)
+    )",
+
+    // Affected Messages Table
+    // Note: affected_register.php defines sender ENUM('affected','support')
+    // Both sender and is_from_admin columns included here for compatibility.
+    "CREATE TABLE IF NOT EXISTS affected_messages (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        affected_id INT NOT NULL,
+        sender ENUM('affected', 'support') DEFAULT 'affected',
+        message_text TEXT NOT NULL,
+        is_from_admin BOOLEAN DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (affected_id) REFERENCES affected_persons(id)
     )"
 );
 
@@ -199,13 +268,13 @@ $sampleData = array(
     // Sample users
     "INSERT IGNORE INTO users (id, role, full_name, email, phone, password, location) VALUES
     (1, 'admin', 'Admin User', 'admin@disasterrelief.bd', '+8801234567890', '" . password_hash('admin123', PASSWORD_BCRYPT) . "', 'Dhaka'),
-    (2, 'camp_manager', 'Rajesh Kumar', 'rajesh@disasterrelief.bd', '+8801712345678', '" . password_hash('manager123', PASSWORD_BCRYPT) . "', 'Mumbai'),
-    (3, 'volunteer', 'Rahul Singh', 'rahul@disasterrelief.bd', '+8801987654321', '" . password_hash('volunteer123', PASSWORD_BCRYPT) . "', 'Camp Alpha'),
-    (4, 'donor', 'John Doe', 'john@example.com', '+8801111111111', '" . password_hash('donor123', PASSWORD_BCRYPT) . "', 'Dhaka')",
+    (2, 'camp_manager', 'Karim Ahmed', 'karim@disasterrelief.bd', '+8801712345678', '" . password_hash('manager123', PASSWORD_BCRYPT) . "', 'Sylhet'),
+    (3, 'volunteer', 'Tanvir Ahmed', 'tanvir@disasterrelief.bd', '+8801987654321', '" . password_hash('volunteer123', PASSWORD_BCRYPT) . "', 'Camp Alpha'),
+    (4, 'donor', 'Hasan Mahmud', 'hasan@example.com', '+8801111111111', '" . password_hash('donor123', PASSWORD_BCRYPT) . "', 'Dhaka')",
 
     // Sample camps
     "INSERT IGNORE INTO camps (id, camp_name, location, manager_id, capacity, current_occupancy, status) VALUES
-    (1, 'Camp Alpha', 'Mumbai', 2, 500, 350, 'active'),
+    (1, 'Camp Alpha', 'Sylhet', 2, 500, 350, 'active'),
     (2, 'Camp Beta', 'Dhaka', 2, 300, 250, 'active')",
 
     // Sample campaigns
@@ -226,8 +295,21 @@ $sampleData = array(
     "INSERT IGNORE INTO schedules (id, user_id, day_of_week, start_time, end_time, location) VALUES
     (1, 3, 'Monday', '09:00:00', '17:00:00', 'Central Relief Camp'),
     (2, 3, 'Wednesday', '13:00:00', '21:00:00', 'Central Relief Camp'),
-    (3, 3, 'Friday', '09:00:00', '17:00:00', 'North Emergency Shelter')"
+    (3, 3, 'Friday', '09:00:00', '17:00:00', 'North Emergency Shelter')",
+    
+    // Sample Volunteer Assignments
+    "INSERT IGNORE INTO volunteer_assignments (volunteer_id, camp_id, assignment_date, status) VALUES
+    (3, 1, '2026-01-01 09:00:00', 'active')",
+
+    // Sample Inventory
+    "INSERT IGNORE INTO inventory (camp_id, item_name, category, quantity, unit, status) VALUES
+    (1, 'Food Packets', 'Food', 500, 'packets', 'In Stock'),
+    (1, 'Water Bottles', 'Water', 1000, 'bottles', 'In Stock'),
+    (1, 'Medical Kits', 'Medical', 50, 'kits', 'In Stock'),
+    (1, 'Blankets', 'Supplies', 200, 'pieces', 'In Stock'),
+    (2, 'Rice Bags', 'Food', 100, 'bags', 'In Stock')"
 );
+
 
 // Insert sample data
 foreach ($sampleData as $query) {

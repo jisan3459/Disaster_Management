@@ -91,6 +91,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $phone = sanitize($_POST['phone']);
             $password = password_hash($_POST['password'], PASSWORD_BCRYPT);
             $location = sanitize($_POST['location'] ?? '');
+            $assigned_camp_id = isset($_POST['camp_id']) ? intval($_POST['camp_id']) : 0;
             
 
             $check = $conn->query("SELECT id FROM users WHERE email = '$email'");
@@ -99,6 +100,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $insert = $conn->query("INSERT INTO users (full_name, email, phone, password, role, location, status) VALUES ('$name', '$email', '$phone', '$password', 'camp_manager', '$location', 'active')");
                 if ($insert) {
+                    $new_manager_id = $conn->insert_id;
+                    if ($assigned_camp_id > 0) {
+                        $conn->query("UPDATE camps SET manager_id = $new_manager_id WHERE id = $assigned_camp_id");
+                    }
                     $success_msg = "Camp manager added successfully.";
                 } else {
                     $error_msg = "Failed to add manager.";
@@ -113,6 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $email = sanitize($_POST['email']);
             $phone = sanitize($_POST['phone']);
             $location = sanitize($_POST['location'] ?? '');
+            $assigned_camp_id = isset($_POST['camp_id']) ? intval($_POST['camp_id']) : 0;
             
             $query = "UPDATE users SET full_name = '$name', email = '$email', phone = '$phone', location = '$location'";
             if (!empty($_POST['password'])) {
@@ -122,6 +128,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $query .= " WHERE id = $mgr_id AND role = 'camp_manager'";
             
             if ($conn->query($query)) {
+                if ($assigned_camp_id > 0) {
+
+                    $conn->query("UPDATE camps SET manager_id = $mgr_id WHERE id = $assigned_camp_id");
+                } elseif ($assigned_camp_id == -1) {
+
+                    $conn->query("UPDATE camps SET manager_id = NULL WHERE manager_id = $mgr_id");
+                }
                 $success_msg = "Manager updated successfully.";
             } else {
                 $error_msg = "Failed to update manager.";
@@ -146,11 +159,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $name = sanitize($_POST['task_name']);
             $desc = sanitize($_POST['description']);
             $camp_id = intval($_POST['camp_id']);
-            $assigned_to = intval($_POST['assigned_to']);
+            $vol_id = intval($_POST['assigned_to']);
             $priority = sanitize($_POST['priority']);
             $due_date = sanitize($_POST['due_date']);
+            $admin_id = $_SESSION['user_id'];
             
-            $insert = $conn->query("INSERT INTO tasks (task_name, description, camp_id, assigned_to, assigned_by, priority, due_date, status) VALUES ('$name', '$desc', $camp_id, $assigned_to, $user_id, '$priority', '$due_date', 'pending')");
+            $insert = $conn->query("INSERT INTO tasks (task_name, description, camp_id, assigned_to, assigned_by, priority, due_date, status) VALUES ('$name', '$desc', $camp_id, $vol_id, $admin_id, '$priority', '$due_date', 'pending')");
             if ($insert) {
                 $success_msg = "Task assigned successfully.";
             } else {
@@ -158,18 +172,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-
         if ($action === 'edit_task') {
             $task_id = intval($_POST['task_id']);
             $name = sanitize($_POST['task_name']);
             $desc = sanitize($_POST['description']);
             $camp_id = intval($_POST['camp_id']);
-            $assigned_to = intval($_POST['assigned_to']);
+            $vol_id = intval($_POST['assigned_to']);
             $priority = sanitize($_POST['priority']);
             $due_date = sanitize($_POST['due_date']);
             $status = sanitize($_POST['status']);
             
-            $update = $conn->query("UPDATE tasks SET task_name = '$name', description = '$desc', camp_id = $camp_id, assigned_to = $assigned_to, priority = '$priority', due_date = '$due_date', status = '$status' WHERE id = $task_id");
+            $update = $conn->query("UPDATE tasks SET task_name = '$name', description = '$desc', camp_id = $camp_id, assigned_to = $vol_id, priority = '$priority', due_date = '$due_date', status = '$status' WHERE id = $task_id");
             if ($update) {
                 $success_msg = "Task updated successfully.";
             } else {
@@ -177,14 +190,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-
         if ($action === 'delete_task') {
             $task_id = intval($_POST['task_id']);
             $delete = $conn->query("DELETE FROM tasks WHERE id = $task_id");
             if ($delete) {
-                $success_msg = "Task deleted successfully.";
+                $success_msg = "Task removed successfully.";
             } else {
-                $error_msg = "Failed to delete task.";
+                $error_msg = "Failed to remove task.";
             }
         }
     }
@@ -202,7 +214,9 @@ $stats_query = [
     'total_volunteers' => $conn->query("SELECT COUNT(*) FROM users WHERE role = 'volunteer'")->fetch_row()[0],
     'affected_people' => $conn->query("SELECT SUM(current_occupancy) FROM camps")->fetch_row()[0] ?? 0,
     'total_donations' => $conn->query("SELECT SUM(amount) FROM donations WHERE status = 'completed'")->fetch_row()[0] ?? 0,
+    'alerts_count' => $conn->query("SELECT COUNT(*) FROM emergency_reports WHERE status IN ('pending', 'in_progress')")->fetch_row()[0] ?? 0,
 ];
+
 
 $stats = [
     ['label' => 'Active Camps', 'value' => $stats_query['active_camps'], 'meta' => 'Real-time data', 'icon' => '⛺', 'color' => '#eff6ff'],
@@ -219,13 +233,15 @@ while($row = $camps_res->fetch_assoc()) {
 }
 
 
-$volunteers_res = $conn->query("SELECT * FROM users WHERE role = 'volunteer' AND status = 'active' ORDER BY created_at DESC");
-
-$volunteers_res = $conn->query("SELECT * FROM users WHERE role = 'volunteer'");
+// Fetch all volunteers for the volunteer list page
+$volunteers_res = $conn->query("SELECT * FROM users WHERE role = 'volunteer' ORDER BY created_at DESC");
 $volunteers = [];
-while($row = $volunteers_res->fetch_assoc()) {
-    $volunteers[] = $row;
+if ($volunteers_res) {
+    while($row = $volunteers_res->fetch_assoc()) {
+        $volunteers[] = $row;
+    }
 }
+
 
 
 $managers_res = $conn->query("SELECT id, full_name FROM users WHERE role = 'camp_manager'");
@@ -254,10 +270,9 @@ if ($page === 'managers') {
 $tasks_list = [];
 if ($page === 'tasks') {
     $tasks_res = $conn->query("
-        SELECT t.*, u.full_name as assigned_name, c.camp_name, b.full_name as assigner_name 
+        SELECT t.*, u.full_name as volunteer_name, c.camp_name 
         FROM tasks t 
         LEFT JOIN users u ON t.assigned_to = u.id 
-        LEFT JOIN users b ON t.assigned_by = b.id
         LEFT JOIN camps c ON t.camp_id = c.id 
         ORDER BY t.created_at DESC
     ");
@@ -265,7 +280,40 @@ if ($page === 'tasks') {
         $tasks_list[] = $row;
     }
 }
+
+$donations_list = [];
+if ($page === 'donations') {
+    $donations_res = $conn->query("
+        SELECT d.*, u.full_name as donor_name, c.campaign_name 
+        FROM donations d 
+        LEFT JOIN users u ON d.donor_id = u.id 
+        LEFT JOIN campaigns c ON d.campaign_id = c.id 
+        ORDER BY d.created_at DESC
+    ");
+    if ($donations_res) {
+        while($row = $donations_res->fetch_assoc()) {
+            $donations_list[] = $row;
+        }
+    }
+}
+
+$inventory_list = [];
+if ($page === 'inventory') {
+    $inventory_res = $conn->query("
+        SELECT i.*, c.camp_name 
+        FROM inventory i 
+        LEFT JOIN camps c ON i.camp_id = c.id 
+        ORDER BY i.item_name ASC
+    ");
+    if ($inventory_res) {
+        while($row = $inventory_res->fetch_assoc()) {
+            $inventory_list[] = $row;
+        }
+    }
+}
 ?>
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -401,11 +449,11 @@ if ($page === 'tasks') {
                 <li class="menu-item"><a href="admin_dashboard.php?page=dashboard" class="menu-link <?php echo $page === 'dashboard' ? 'active' : ''; ?>"><span class="menu-icon">📊</span>Dashboard</a></li>
                 <li class="menu-item"><a href="admin_dashboard.php?page=managers" class="menu-link <?php echo $page === 'managers' ? 'active' : ''; ?>"><span class="menu-icon">👤</span>Camp Managers</a></li>
                 <li class="menu-item"><a href="admin_dashboard.php?page=camps" class="menu-link <?php echo $page === 'camps' ? 'active' : ''; ?>"><span class="menu-icon">⛺</span>Camps</a></li>
-                <li class="menu-item"><a href="admin_dashboard.php?page=tasks" class="menu-link <?php echo $page === 'tasks' ? 'active' : ''; ?>"><span class="menu-icon">📋</span>Tasks</a></li>
-                <li class="menu-item"><a href="admin_dashboard.php?page=volunteers" class="menu-link <?php echo $page === 'volunteers' ? 'active' : ''; ?>"><span class="menu-icon">🧑‍🤝‍🧑</span>Volunteers<span class="menu-badge">6</span></a></li>
+                <li class="menu-item"><a href="admin_dashboard.php?page=volunteers" class="menu-link <?php echo $page === 'volunteers' ? 'active' : ''; ?>"><span class="menu-icon">🧑‍🤝‍🧑</span>Volunteers<span class="menu-badge"><?php echo $stats_query['total_volunteers']; ?></span></a></li>
                 <li class="menu-item"><a href="admin_dashboard.php?page=donations" class="menu-link <?php echo $page === 'donations' ? 'active' : ''; ?>"><span class="menu-icon">💵</span>Donations</a></li>
+                <li class="menu-item"><a href="admin_dashboard.php?page=tasks" class="menu-link <?php echo $page === 'tasks' ? 'active' : ''; ?>"><span class="menu-icon">📋</span>Task Assignment</a></li>
                 <li class="menu-item"><a href="admin_dashboard.php?page=inventory" class="menu-link <?php echo $page === 'inventory' ? 'active' : ''; ?>"><span class="menu-icon">📦</span>Inventory</a></li>
-                <li class="menu-item"><a href="admin_dashboard.php?page=alerts" class="menu-link <?php echo $page === 'alerts' ? 'active' : ''; ?>"><span class="menu-icon">⚠️</span>Alerts<span class="menu-badge">3</span></a></li>
+                <li class="menu-item"><a href="admin_dashboard.php?page=alerts" class="menu-link <?php echo $page === 'alerts' ? 'active' : ''; ?>"><span class="menu-icon">⚠️</span>Alerts<span class="menu-badge"><?php echo $stats_query['alerts_count']; ?></span></a></li>
                 <li class="menu-item"><a href="admin_dashboard.php?page=reports" class="menu-link <?php echo $page === 'reports' ? 'active' : ''; ?>"><span class="menu-icon">📈</span>Reports</a></li>
                 <li class="menu-item"><a href="admin_dashboard.php?page=settings" class="menu-link <?php echo $page === 'settings' ? 'active' : ''; ?>"><span class="menu-icon">⚙️</span>Settings</a></li>
             </ul>
@@ -418,19 +466,8 @@ if ($page === 'tasks') {
                     <div class="topbar-subtitle">Manage operations safely from a single control center</div>
                 </div>
                 <div class="topbar-actions">
-                    <?php if ($page === 'camps'): ?>
-                        <button type="button" class="btn-primary" onclick="openAddCampModal()">+ Add New Camp</button>
-                    <?php elseif ($page === 'managers'): ?>
-                        <button type="button" class="btn-primary" onclick="openAddManagerModal()">+ Add Manager</button>
-                    <?php elseif ($page === 'tasks'): ?>
-                        <button type="button" class="btn-primary" onclick="openAddTaskModal()">+ Assign New Task</button>
-                    <?php elseif ($page === 'volunteers'): ?>
-                        <button type="button" class="btn-primary" onclick="alert('Invite functionality coming soon');">+ Invite Volunteer</button>
-                    <?php elseif ($page === 'donations'): ?>
-                        <button type="button" class="btn-primary" onclick="alert('Record new donation');">+ New Donation</button>
-                    <?php elseif ($page === 'reports'): ?>
-                        <button type="button" class="btn-primary" onclick="alert('Generating report');">Generate Report</button>
-                    <?php endif; ?>
+
+
                     <div class="notification">🔔 <?php if ($unread_count > 0): ?>
                         <span class="notification-badge"><?php echo $unread_count; ?></span>
                     <?php endif; ?></div>
@@ -666,96 +703,6 @@ if ($page === 'tasks') {
                             </table>
                         </div>
                     </div>
-                <?php elseif ($page === 'tasks'): ?>
-                    <div class="page-header">
-                        <div>
-                            <div class="page-title">Task Assignments</div>
-                            <div class="page-subtitle">Assign tasks to volunteers and track progress</div>
-                        </div>
-                        <button type="button" class="btn-primary" onclick="openAddTaskModal()">+ Assign New Task</button>
-                    </div>
-
-                    <div class="search-box" style="margin-bottom: 1.5rem;">
-                        <input id="taskSearch" type="text" placeholder="Search tasks by name, assignee or camp...">
-                    </div>
-
-                    <div class="panel">
-                        <div class="panel-heading">
-                            <h3>Current Task Status</h3>
-                        </div>
-                        <div style="overflow-x: auto;">
-                            <table class="table" id="tasksTable">
-                                <thead>
-                                    <tr>
-                                        <th>Task Name</th>
-                                        <th>Assignee</th>
-                                        <th>Camp</th>
-                                        <th>Priority</th>
-                                        <th>Due Date</th>
-                                        <th>Status</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php if (empty($tasks_list)): ?>
-                                        <tr><td colspan="7" style="text-align:center; padding:3rem; color:#6b7280;">No tasks found. Start by assigning a new task.</td></tr>
-                                    <?php endif; ?>
-                                    <?php foreach ($tasks_list as $task): ?>
-                                        <tr class="task-row">
-                                            <td>
-                                                <div style="font-weight:600; color:#111827;"><?php echo htmlspecialchars($task['task_name']); ?></div>
-                                                <div style="font-size:0.8rem; color:#6b7280; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"><?php echo htmlspecialchars($task['description']); ?></div>
-                                            </td>
-                                            <td>
-                                                <div style="display:flex; align-items:center; gap:0.5rem;">
-                                                    <div class="profile-avatar" style="width:28px; height:28px; font-size:0.8rem;">
-                                                        <?php echo strtoupper(substr($task['assigned_name'] ?? 'U', 0, 1)); ?>
-                                                    </div>
-                                                    <span><?php echo htmlspecialchars($task['assigned_name'] ?: 'Unassigned'); ?></span>
-                                                </div>
-                                            </td>
-                                            <td><?php echo htmlspecialchars($task['camp_name'] ?: 'General'); ?></td>
-                                            <td>
-                                                <?php 
-                                                    $p_color = '#6b7280';
-                                                    if($task['priority'] === 'high') $p_color = '#ef4444';
-                                                    if($task['priority'] === 'medium') $p_color = '#f59e0b';
-                                                ?>
-                                                <span style="color:<?php echo $p_color; ?>; font-weight:600; font-size:0.85rem;">
-                                                    ● <?php echo ucfirst($task['priority']); ?>
-                                                </span>
-                                            </td>
-                                            <td><?php echo $task['due_date'] ? date('M d, H:i', strtotime($task['due_date'])) : 'No date'; ?></td>
-                                            <td>
-                                                <?php 
-                                                    $s_bg = '#f3f4f6'; $s_fg = '#6b7280';
-                                                    if($task['status'] === 'completed') { $s_bg = '#ecfdf5'; $s_fg = '#059669'; }
-                                                    if($task['status'] === 'in_progress') { $s_bg = '#eff6ff'; $s_fg = '#2563eb'; }
-                                                ?>
-                                                <span class="badge" style="background:<?php echo $s_bg; ?>; color:<?php echo $s_fg; ?>;">
-                                                    <?php echo ucfirst(str_replace('_', ' ', $task['status'])); ?>
-                                                </span>
-                                            </td>
-                                            <td class="table-actions">
-                                                <div style="display:flex; gap:0.5rem;">
-                                                    <button class="btn-secondary" style="padding:0.5rem; border-radius:10px; width:36px; height:36px; display:grid; place-items:center;" onclick='openEditTaskModal(<?php echo json_encode($task); ?>)' title="Edit Task">
-                                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                                                    </button>
-                                                    <form method="POST" onsubmit="return confirm('Delete this task?');" style="display:inline;">
-                                                        <input type="hidden" name="action" value="delete_task">
-                                                        <input type="hidden" name="task_id" value="<?php echo $task['id']; ?>">
-                                                        <button class="btn-danger" type="submit" style="padding:0.5rem; border-radius:10px; width:36px; height:36px; display:grid; place-items:center;" title="Delete Task">
-                                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                                                        </button>
-                                                    </form>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
                 <?php elseif ($page === 'volunteers'): ?>
                     <div class="page-header">
                         <div>
@@ -803,23 +750,197 @@ if ($page === 'tasks') {
                 <?php elseif ($page === 'donations'): ?>
                     <div class="page-header">
                         <div>
-                            <div class="page-title">Donations</div>
-                            <div class="page-subtitle">Track contributions and funding status</div>
+                            <div class="page-title">Donation Management</div>
+                            <div class="page-subtitle">Track and verify all contributions from donors</div>
                         </div>
-                        <button type="button" class="btn-primary" onclick="alert('Record new donation');">Record Donation</button>
+                        <div style="display:flex; gap:0.75rem;">
+                            <button type="button" class="btn-secondary" onclick="window.print()">Export Report</button>
+                            <button type="button" class="btn-primary" onclick="alert('Manual record entry coming soon')">+ Record Donation</button>
+                        </div>
                     </div>
+
+                    <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 2rem;">
+                        <div class="stat-card" style="background: #f5f3ff;">
+                            <div class="stat-text">
+                                <span class="stat-label">Total Raised</span>
+                                <span class="stat-value">৳<?php echo number_format($stats_query['total_donations']); ?></span>
+                                <span class="stat-meta" style="color:#7c3aed;">Lifetime contributions</span>
+                            </div>
+                            <div class="stat-icon">💰</div>
+                        </div>
+                        <div class="stat-card" style="background: #ecfdf5;">
+                            <div class="stat-text">
+                                <span class="stat-label">Total Donors</span>
+                                <span class="stat-value"><?php echo count(array_unique(array_column($donations_list, 'donor_id'))); ?></span>
+                                <span class="stat-meta">Unique supporters</span>
+                            </div>
+                            <div class="stat-icon">🤝</div>
+                        </div>
+                        <div class="stat-card" style="background: #fff7ed;">
+                            <div class="stat-text">
+                                <span class="stat-label">Recent Donations</span>
+                                <span class="stat-value"><?php echo count(array_filter($donations_list, function($d) { return strtotime($d['created_at']) > strtotime('-7 days'); })); ?></span>
+                                <span class="stat-meta">In the last 7 days</span>
+                            </div>
+                            <div class="stat-icon">⚡</div>
+                        </div>
+                    </div>
+
+                    <div class="search-box" style="margin-bottom: 1.5rem;">
+                        <input id="donationSearch" type="text" placeholder="Search by donor name, campaign, or transaction ID...">
+                    </div>
+
                     <div class="panel">
-                        <p>Donation analytics and recent contributions are displayed here.</p>
+                        <div class="panel-heading">
+                            <h3>Donation History</h3>
+                        </div>
+                        <div style="overflow-x: auto;">
+                            <table class="table" id="donationsTable">
+                                <thead>
+                                    <tr>
+                                        <th>Donor</th>
+                                        <th>Campaign</th>
+                                        <th>Amount</th>
+                                        <th>Type</th>
+                                        <th>Status</th>
+                                        <th>Transaction ID</th>
+                                        <th>Date</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php if (empty($donations_list)): ?>
+                                        <tr><td colspan="8" style="text-align:center; padding:3rem; color:#6b7280;">No donations recorded yet.</td></tr>
+                                    <?php endif; ?>
+                                    <?php foreach ($donations_list as $donation): ?>
+                                        <tr class="donation-row">
+                                            <td>
+                                                <div style="display:flex; align-items:center; gap:0.75rem;">
+                                                    <div class="profile-avatar" style="width:32px; height:32px; font-size:0.8rem; background: #e0f2fe; color: #0369a1;">
+                                                        <?php echo strtoupper(substr($donation['donor_name'] ?? 'U', 0, 1)); ?>
+                                                    </div>
+                                                    <span style="font-weight:600;"><?php echo htmlspecialchars($donation['donor_name'] ?? 'Guest Donor'); ?></span>
+                                                </div>
+                                            </td>
+                                            <td><?php echo htmlspecialchars($donation['campaign_name'] ?? 'General Fund'); ?></td>
+                                            <td style="font-weight:700; color:#111827;">৳<?php echo number_format($donation['amount'], 2); ?></td>
+                                            <td><span class="badge" style="background:#f3f4f6; color:#4b5563;"><?php echo ucfirst($donation['donation_type']); ?></span></td>
+                                            <td>
+                                                <span class="badge <?php echo $donation['status'] === 'completed' ? 'active' : ($donation['status'] === 'pending' ? 'inactive' : 'btn-danger'); ?>" style="<?php echo $donation['status'] === 'failed' ? 'background:#fef2f2; color:#ef4444;' : ''; ?>">
+                                                    <?php echo ucfirst($donation['status']); ?>
+                                                </span>
+                                            </td>
+                                            <td><code style="font-size:0.85rem; color:#6b7280;"><?php echo htmlspecialchars($donation['transaction_id'] ?: 'N/A'); ?></code></td>
+                                            <td><?php echo date('M d, Y', strtotime($donation['created_at'])); ?></td>
+                                            <td class="table-actions">
+                                                <button class="btn-secondary" style="padding:0.4rem 0.8rem;" onclick="alert('Viewing details for <?php echo $donation['transaction_id']; ?>')">View</button>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
+
                 <?php elseif ($page === 'inventory'): ?>
                     <div class="page-header">
                         <div>
-                            <div class="page-title">Inventory</div>
-                            <div class="page-subtitle">Manage supplies across camps</div>
+                            <div class="page-title">Inventory Management</div>
+                            <div class="page-subtitle">Track and manage supplies across all relief camps</div>
                         </div>
-                        <button type="button" class="btn-primary" onclick="alert('Add inventory item');">Add Item</button>
+                        <div style="display:flex; gap:0.75rem;">
+                            <button type="button" class="btn-secondary" onclick="window.print()">Export Inventory</button>
+                            <button type="button" class="btn-primary" onclick="alert('Add item functionality coming soon')">+ Add New Item</button>
+                        </div>
                     </div>
-                    <div class="panel"><p>Inventory levels, stock alerts, and restocking actions can be managed here.</p></div>
+
+                    <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 2rem;">
+                        <div class="stat-card" style="background: #eef2ff;">
+                            <div class="stat-text">
+                                <span class="stat-label">Total Items</span>
+                                <span class="stat-value"><?php echo count($inventory_list); ?></span>
+                                <span class="stat-meta">Across all categories</span>
+                            </div>
+                            <div class="stat-icon">📦</div>
+                        </div>
+                        <div class="stat-card" style="background: #fff7ed;">
+                            <div class="stat-text">
+                                <span class="stat-label">Low Stock Alerts</span>
+                                <span class="stat-value"><?php echo count(array_filter($inventory_list, function($i) { return $i['status'] === 'Limited'; })); ?></span>
+                                <span class="stat-meta">Items needing restock</span>
+                            </div>
+                            <div class="stat-icon">⚠️</div>
+                        </div>
+                        <div class="stat-card" style="background: #ecfdf5;">
+                            <div class="stat-text">
+                                <span class="stat-label">Stock Status</span>
+                                <span class="stat-value"><?php echo count(array_filter($inventory_list, function($i) { return $i['status'] === 'In Stock'; })); ?></span>
+                                <span class="stat-meta">Items fully available</span>
+                            </div>
+                            <div class="stat-icon">✅</div>
+                        </div>
+                    </div>
+
+                    <div class="search-box" style="margin-bottom: 1.5rem;">
+                        <input id="inventorySearch" type="text" placeholder="Search by item name, category or camp...">
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-heading">
+                            <h3>Supply Stock Levels</h3>
+                        </div>
+                        <div style="overflow-x: auto;">
+                            <table class="table" id="inventoryTable">
+                                <thead>
+                                    <tr>
+                                        <th>Item Name</th>
+                                        <th>Category</th>
+                                        <th>Camp Location</th>
+                                        <th>Quantity</th>
+                                        <th>Status</th>
+                                        <th>Last Updated</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php if (empty($inventory_list)): ?>
+                                        <tr><td colspan="7" style="text-align:center; padding:3rem; color:#6b7280;">No inventory records found.</td></tr>
+                                    <?php endif; ?>
+                                    <?php foreach ($inventory_list as $item): ?>
+                                        <tr class="inventory-row">
+                                            <td>
+                                                <div style="font-weight:600; color:#111827;"><?php echo htmlspecialchars($item['item_name']); ?></div>
+                                            </td>
+                                            <td><span class="badge" style="background:#f3f4f6; color:#4b5563;"><?php echo htmlspecialchars($item['category']); ?></span></td>
+                                            <td><?php echo htmlspecialchars($item['camp_name'] ?: 'Central Warehouse'); ?></td>
+                                            <td>
+                                                <span style="font-weight:700; color:#111827;"><?php echo number_format($item['quantity'], 1); ?></span>
+                                                <span style="font-size:0.8rem; color:#6b7280;"><?php echo htmlspecialchars($item['unit']); ?></span>
+                                            </td>
+                                            <td>
+                                                <?php
+                                                    $sClass = 'inactive';
+                                                    if($item['status'] === 'In Stock') $sClass = 'active';
+                                                    
+                                                    $sStyle = "";
+                                                    if($item['status'] === 'Limited') $sStyle = "background:#fffbeb; color:#d97706;";
+                                                    if($item['status'] === 'Out of Stock') $sStyle = "background:#fef2f2; color:#ef4444;";
+                                                ?>
+                                                <span class="badge <?php echo $sClass; ?>" style="<?php echo $sStyle; ?>">
+                                                    <?php echo htmlspecialchars($item['status']); ?>
+                                                </span>
+                                            </td>
+                                            <td><?php echo date('M d, Y', strtotime($item['updated_at'])); ?></td>
+                                            <td class="table-actions">
+                                                <button class="btn-secondary" style="padding:0.4rem 0.8rem;" onclick="alert('Adjusting stock for <?php echo $item['item_name']; ?>')">Adjust</button>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
                 <?php elseif ($page === 'alerts'): ?>
                     <div class="page-header">
                         <div>
@@ -849,6 +970,98 @@ if ($page === 'tasks') {
                         <div class="form-field"><label>Theme</label><select><option>Light</option><option>Dark</option></select></div>
                         <div class="form-field"><label>System Status</label><input type="text" value="All systems operational" disabled></div>
                         <button class="btn-secondary" type="button" onclick="alert('Settings saved');">Save Settings</button>
+                    </div>
+                <?php elseif ($page === 'tasks'): ?>
+                    <div class="page-header">
+                        <div>
+                            <div class="page-title">Task Assignment & Tracking</div>
+                            <div class="page-subtitle">Assign responsibilities to volunteers and track progress</div>
+                        </div>
+                        <button type="button" class="btn-primary" onclick="openAddTaskModal()">+ Assign New Task</button>
+                    </div>
+                    
+                    <div class="search-box" style="margin-bottom: 1.5rem;">
+                        <input id="taskSearch" type="text" placeholder="Search tasks by name, volunteer or camp...">
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-heading">
+                            <h3>Active Task Assignments</h3>
+                        </div>
+                        <div style="overflow-x: auto;">
+                            <table class="table" id="tasksTable">
+                                <thead>
+                                    <tr>
+                                        <th>Task Name</th>
+                                        <th>Assigned To</th>
+                                        <th>Camp</th>
+                                        <th>Priority</th>
+                                        <th>Due Date</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php if (empty($tasks_list)): ?>
+                                        <tr><td colspan="7" style="text-align:center; padding:3rem; color:#6b7280;">No tasks found. Assign your first task to get started.</td></tr>
+                                    <?php endif; ?>
+                                    <?php foreach ($tasks_list as $task): ?>
+                                        <tr class="task-row">
+                                            <td>
+                                                <div style="font-weight:600; color:#111827;"><?php echo htmlspecialchars($task['task_name']); ?></div>
+                                                <div style="font-size:0.75rem; color:#6b7280; max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="<?php echo htmlspecialchars($task['description']); ?>">
+                                                    <?php echo htmlspecialchars($task['description']); ?>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div style="display:flex; align-items:center; gap:0.5rem;">
+                                                    <div class="profile-avatar" style="width:28px; height:28px; font-size:0.7rem;">
+                                                        <?php echo strtoupper(substr($task['volunteer_name'] ?? 'U', 0, 1)); ?>
+                                                    </div>
+                                                    <span><?php echo htmlspecialchars($task['volunteer_name'] ?? 'Unassigned'); ?></span>
+                                                </div>
+                                            </td>
+                                            <td><?php echo htmlspecialchars($task['camp_name'] ?? 'N/A'); ?></td>
+                                            <td>
+                                                <?php 
+                                                    $pColor = '#6b7280';
+                                                    if($task['priority'] === 'high') $pColor = '#ef4444';
+                                                    if($task['priority'] === 'medium') $pColor = '#f59e0b';
+                                                ?>
+                                                <span style="display:inline-flex; align-items:center; gap:0.25rem; color:<?php echo $pColor; ?>; font-weight:600; font-size:0.85rem;">
+                                                    ● <?php echo ucfirst($task['priority']); ?>
+                                                </span>
+                                            </td>
+                                            <td><?php echo date('M d, H:i', strtotime($task['due_date'])); ?></td>
+                                            <td>
+                                                <?php
+                                                    $sClass = 'inactive';
+                                                    if($task['status'] === 'in_progress') $sClass = 'active';
+                                                    if($task['status'] === 'completed') $sClass = 'active';
+                                                    
+                                                    $sStyle = "";
+                                                    if($task['status'] === 'completed') $sStyle = "background:#ecfdf5; color:#059669;";
+                                                    if($task['status'] === 'in_progress') $sStyle = "background:#fffbeb; color:#d97706;";
+                                                ?>
+                                                <span class="badge <?php echo $sClass; ?>" style="<?php echo $sStyle; ?>">
+                                                    <?php echo ucfirst(str_replace('_', ' ', $task['status'])); ?>
+                                                </span>
+                                            </td>
+                                            <td class="table-actions">
+                                                <div style="display:flex; gap:0.5rem;">
+                                                    <button class="btn-secondary" style="padding:0.4rem; border-radius:8px;" onclick='openEditTaskModal(<?php echo json_encode($task); ?>)'>Edit</button>
+                                                    <form method="POST" onsubmit="return confirm('Delete this task?');" style="display:inline;">
+                                                        <input type="hidden" name="action" value="delete_task">
+                                                        <input type="hidden" name="task_id" value="<?php echo $task['id']; ?>">
+                                                        <button class="btn-danger" type="submit" style="padding:0.4rem; border-radius:8px;">Delete</button>
+                                                    </form>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 <?php endif; ?>
             </div>
@@ -954,12 +1167,60 @@ if ($page === 'tasks') {
             document.getElementById('edit_mgr_email').value = mgr.email;
             document.getElementById('edit_mgr_phone').value = mgr.phone;
             document.getElementById('edit_mgr_location').value = mgr.location || '';
+            if (document.getElementById('edit_mgr_camp')) {
+                document.getElementById('edit_mgr_camp').value = "0";
+            }
             document.getElementById('editManagerModal').style.display = 'grid';
         }
 
         function closeEditManagerModal() {
             document.getElementById('editManagerModal').style.display = 'none';
         }
+
+        function openAddTaskModal() {
+            document.getElementById('addTaskModal').style.display = 'grid';
+        }
+
+        function closeAddTaskModal() {
+            document.getElementById('addTaskModal').style.display = 'none';
+        }
+
+        function openEditTaskModal(task) {
+            document.getElementById('edit_task_id').value = task.id;
+            document.getElementById('edit_task_name').value = task.task_name;
+            document.getElementById('edit_task_desc').value = task.description;
+            document.getElementById('edit_task_camp').value = task.camp_id;
+            document.getElementById('edit_task_vol').value = task.assigned_to;
+            document.getElementById('edit_task_priority').value = task.priority;
+            document.getElementById('edit_task_due').value = task.due_date.replace(' ', 'T').substring(0, 16);
+            document.getElementById('edit_task_status').value = task.status;
+            document.getElementById('editTaskModal').style.display = 'grid';
+        }
+
+        function closeEditTaskModal() {
+            document.getElementById('editTaskModal').style.display = 'none';
+        }
+
+        document.getElementById('taskSearch')?.addEventListener('input', function() {
+            const filter = this.value.toLowerCase();
+            document.querySelectorAll('#tasksTable tbody tr').forEach(function(row) {
+                row.style.display = row.textContent.toLowerCase().includes(filter) ? '' : 'none';
+            });
+        });
+
+        document.getElementById('donationSearch')?.addEventListener('input', function() {
+            const filter = this.value.toLowerCase();
+            document.querySelectorAll('#donationsTable tbody tr').forEach(function(row) {
+                row.style.display = row.textContent.toLowerCase().includes(filter) ? '' : 'none';
+            });
+        });
+
+        document.getElementById('inventorySearch')?.addEventListener('input', function() {
+            const filter = this.value.toLowerCase();
+            document.querySelectorAll('#inventoryTable tbody tr').forEach(function(row) {
+                row.style.display = row.textContent.toLowerCase().includes(filter) ? '' : 'none';
+            });
+        });
 
         function toggleProfileMenu() {
             const dropdown = document.getElementById('profileDropdown');
@@ -974,42 +1235,6 @@ if ($page === 'tasks') {
                 }
             });
         }
-
-
-        function openAddTaskModal() {
-            document.getElementById('addTaskModal').style.display = 'grid';
-        }
-        function closeAddTaskModal() {
-            document.getElementById('addTaskModal').style.display = 'none';
-        }
-        function openEditTaskModal(task) {
-            document.getElementById('edit_task_id').value = task.id;
-            document.getElementById('edit_task_name').value = task.task_name;
-            document.getElementById('edit_task_desc').value = task.description;
-            document.getElementById('edit_task_camp').value = task.camp_id;
-            document.getElementById('edit_task_assigned').value = task.assigned_to;
-            document.getElementById('edit_task_priority').value = task.priority;
-            document.getElementById('edit_task_due').value = task.due_date ? task.due_date.replace(' ', 'T') : '';
-            document.getElementById('edit_task_status').value = task.status;
-            document.getElementById('editTaskModal').style.display = 'grid';
-        }
-        function closeEditTaskModal() {
-            document.getElementById('editTaskModal').style.display = 'none';
-        }
-
-        document.getElementById('taskSearch')?.addEventListener('input', function() {
-            const filter = this.value.toLowerCase();
-            document.querySelectorAll('#tasksTable tbody tr').forEach(function(row) {
-                row.style.display = row.textContent.toLowerCase().includes(filter) ? '' : 'none';
-            });
-        });
-
-        document.getElementById('managerSearch')?.addEventListener('input', function() {
-            const filter = this.value.toLowerCase();
-            document.querySelectorAll('#managersTable tbody tr.manager-row').forEach(function(row) {
-                row.style.display = row.textContent.toLowerCase().includes(filter) ? '' : 'none';
-            });
-        });
     </script>
 
 
@@ -1040,6 +1265,15 @@ if ($page === 'tasks') {
                 <div class="form-field">
                     <label>Location (Optional)</label>
                     <input type="text" name="location" placeholder="e.g. Dhaka">
+                </div>
+                <div class="form-field">
+                    <label>Assign Camp (Optional)</label>
+                    <select name="camp_id">
+                        <option value="0">Leave Unassigned</option>
+                        <?php foreach ($camps as $camp): ?>
+                            <option value="<?php echo $camp['id']; ?>"><?php echo htmlspecialchars($camp['camp_name']) . " (" . htmlspecialchars($camp['location']) . ")"; ?></option>
+                        <?php endforeach; ?>
+                    </select>
                 </div>
                 <div style="display:flex; gap:1rem; margin-top:1.5rem;">
                     <button type="button" class="btn-secondary" style="flex:1;" onclick="closeAddManagerModal()">Cancel</button>
@@ -1079,6 +1313,16 @@ if ($page === 'tasks') {
                     <label>Location</label>
                     <input type="text" name="location" id="edit_mgr_location">
                 </div>
+                <div class="form-field">
+                    <label>Assign to Camp</label>
+                    <select name="camp_id" id="edit_mgr_camp">
+                        <option value="0">Don't Change Assignment</option>
+                        <option value="-1">Unassign All Camps</option>
+                        <?php foreach ($camps as $camp): ?>
+                            <option value="<?php echo $camp['id']; ?>"><?php echo htmlspecialchars($camp['camp_name']) . " (" . htmlspecialchars($camp['location']) . ")"; ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
                 <div style="display:flex; gap:1rem; margin-top:1.5rem;">
                     <button type="button" class="btn-secondary" style="flex:1;" onclick="closeEditManagerModal()">Cancel</button>
                     <button type="submit" class="btn-primary" style="flex:1;">Save Changes</button>
@@ -1115,7 +1359,6 @@ if ($page === 'tasks') {
         </div>
     </div>
 
-
     <div id="addTaskModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:100; place-items:center; padding:2rem;">
         <div class="panel" style="width:100%; max-width:500px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">
             <div class="panel-heading">
@@ -1126,14 +1369,14 @@ if ($page === 'tasks') {
                 <input type="hidden" name="action" value="add_task">
                 <div class="form-field">
                     <label>Task Name</label>
-                    <input type="text" name="task_name" placeholder="e.g. Food Distribution" required>
+                    <input type="text" name="task_name" placeholder="e.g. Distribute Food" required>
                 </div>
                 <div class="form-field">
                     <label>Description</label>
-                    <textarea name="description" placeholder="Describe the task details..."></textarea>
+                    <textarea name="description" placeholder="Describe the task details..." required></textarea>
                 </div>
                 <div class="form-field">
-                    <label>Relief Camp</label>
+                    <label>Camp</label>
                     <select name="camp_id" required>
                         <option value="">Select Camp</option>
                         <?php foreach ($camps as $c): ?>
@@ -1150,19 +1393,17 @@ if ($page === 'tasks') {
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
-                    <div class="form-field">
-                        <label>Priority</label>
-                        <select name="priority">
-                            <option value="low">Low</option>
-                            <option value="medium" selected>Medium</option>
-                            <option value="high">High</option>
-                        </select>
-                    </div>
-                    <div class="form-field">
-                        <label>Due Date</label>
-                        <input type="datetime-local" name="due_date" required>
-                    </div>
+                <div class="form-field">
+                    <label>Priority</label>
+                    <select name="priority">
+                        <option value="low">Low</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="high">High</option>
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label>Due Date</label>
+                    <input type="datetime-local" name="due_date" required>
                 </div>
                 <div style="display:flex; gap:1rem; margin-top:1.5rem;">
                     <button type="button" class="btn-secondary" style="flex:1;" onclick="closeAddTaskModal()">Cancel</button>
@@ -1188,10 +1429,10 @@ if ($page === 'tasks') {
                 </div>
                 <div class="form-field">
                     <label>Description</label>
-                    <textarea name="description" id="edit_task_desc"></textarea>
+                    <textarea name="description" id="edit_task_desc" required></textarea>
                 </div>
                 <div class="form-field">
-                    <label>Relief Camp</label>
+                    <label>Camp</label>
                     <select name="camp_id" id="edit_task_camp" required>
                         <?php foreach ($camps as $c): ?>
                             <option value="<?php echo $c['id']; ?>"><?php echo htmlspecialchars($c['camp_name']); ?></option>
@@ -1199,42 +1440,304 @@ if ($page === 'tasks') {
                     </select>
                 </div>
                 <div class="form-field">
-                    <label>Assign To (Volunteer)</label>
-                    <select name="assigned_to" id="edit_task_assigned" required>
+                    <label>Assign To</label>
+                    <select name="assigned_to" id="edit_task_vol" required>
                         <?php foreach ($volunteers as $v): ?>
                             <option value="<?php echo $v['id']; ?>"><?php echo htmlspecialchars($v['full_name']); ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
-                    <div class="form-field">
-                        <label>Priority</label>
-                        <select name="priority" id="edit_task_priority">
-                            <option value="low">Low</option>
-                            <option value="medium">Medium</option>
-                            <option value="high">High</option>
-                        </select>
-                    </div>
-                    <div class="form-field">
-                        <label>Status</label>
-                        <select name="status" id="edit_task_status">
-                            <option value="pending">Pending</option>
-                            <option value="in_progress">In Progress</option>
-                            <option value="completed">Completed</option>
-                        </select>
-                    </div>
+                <div class="form-field">
+                    <label>Priority</label>
+                    <select name="priority" id="edit_task_priority">
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                    </select>
                 </div>
                 <div class="form-field">
                     <label>Due Date</label>
                     <input type="datetime-local" name="due_date" id="edit_task_due" required>
                 </div>
+                <div class="form-field">
+                    <label>Status</label>
+                    <select name="status" id="edit_task_status">
+                        <option value="pending">Pending</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="completed">Completed</option>
+                    </select>
+                </div>
                 <div style="display:flex; gap:1rem; margin-top:1.5rem;">
                     <button type="button" class="btn-secondary" style="flex:1;" onclick="closeEditTaskModal()">Cancel</button>
-                    <button type="submit" class="btn-primary" style="flex:1;">Update Task</button>
+                    <button type="submit" class="btn-primary" style="flex:1;">Save Changes</button>
                 </div>
             </form>
         </div>
     </div>
+
+    <!-- Donation Details Modal -->
+    <div id="donationDetailsModal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.4); backdrop-filter:blur(8px); z-index:100; place-items:center; padding:2rem; overflow-y:auto;">
+        <div class="panel" style="width:100%; max-width:700px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.3); border-radius:24px; border:1px solid rgba(255,255,255,0.2); overflow:hidden; background:rgba(255,255,255,0.98); animation: modalFadeIn 0.3s ease-out; display:flex; flex-direction:column; gap:0;">
+            <div class="panel-heading" style="border-bottom:1px solid #f1f5f9; padding:1.25rem 1.5rem; display:flex; justify-content:space-between; align-items:center; margin:0;">
+                <h3 style="font-size:1.25rem; font-weight:700; color:#0f172a; display:flex; align-items:center; gap:0.5rem; margin:0;">
+                    <span id="modal_header_icon">🎁</span> Donation Receipt Details
+                </h3>
+                <button type="button" onclick="closeDonationDetailsModal()" style="background:none; border:none; font-size:1.75rem; cursor:pointer; color:#94a3b8; transition:color 0.2s; line-height:1; margin:0; padding:0;" onmouseover="this.style.color='#0f172a'" onmouseout="this.style.color='#94a3b8'">&times;</button>
+            </div>
+            
+            <div style="padding:1.5rem; display:grid; grid-template-columns:1.1fr 0.9fr; gap:2rem; text-align:left; overflow-y:auto; max-height:calc(85vh - 200px);">
+                <!-- Left side: Donor & General Info -->
+                <div style="display:flex; flex-direction:column; gap:1.25rem; border-right:1px solid #e2e8f0; padding-right:1.75rem;">
+                    <div>
+                        <h4 style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin-bottom:0.5rem; font-weight:700; margin-top:0;">Donor Profile</h4>
+                        <div style="display:flex; align-items:center; gap:0.75rem; margin-top:0.25rem;">
+                            <div class="profile-avatar" id="modal_donor_avatar" style="width:42px; height:42px; font-weight:700; font-size:1.1rem; background:#eff6ff; color:#2563eb; display:grid; place-items:center; border-radius:50%;">U</div>
+                            <div>
+                                <div id="modal_donor_name" style="font-weight:700; color:#0f172a; font-size:0.95rem;">Hasan Mahmud</div>
+                                <div id="modal_donor_role" style="font-size:0.75rem; color:#64748b;">Registered Donor</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <h4 style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin-bottom:0.35rem; font-weight:700; margin-top:0;">Contact Details</h4>
+                        <p style="font-size:0.88rem; color:#334155; display:flex; align-items:center; gap:0.5rem; margin:0 0 0.35rem 0;">
+                            📧 <span id="modal_donor_email">hasan@example.com</span>
+                        </p>
+                        <p style="font-size:0.88rem; color:#334155; display:flex; align-items:center; gap:0.5rem; margin:0;">
+                            📞 <span id="modal_donor_phone">+8801711111111</span>
+                        </p>
+                    </div>
+
+                    <div>
+                        <h4 style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin-bottom:0.35rem; font-weight:700; margin-top:0;">Target Campaign</h4>
+                        <p id="modal_campaign" style="font-size:0.88rem; color:#334155; font-weight:600; margin:0;">Flood Relief - Dhaka Division</p>
+                    </div>
+
+                    <div>
+                        <h4 style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin-bottom:0.35rem; font-weight:700; margin-top:0;">Donor Note</h4>
+                        <div id="modal_message_box" style="background:#f8fafc; border-left:3px solid #cbd5e1; padding:0.75rem 1rem; border-radius:0 8px 8px 0; font-size:0.88rem; color:#475569; font-style:italic; line-height:1.4; margin:0;">
+                            "I hope this helps the affected people in Sylhet."
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right side: Donation Specifics & Logistics -->
+                <div style="display:flex; flex-direction:column; gap:1.25rem;">
+                    <div>
+                        <h4 style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin-bottom:0.35rem; font-weight:700; margin-top:0;">Donation Contribution</h4>
+                        <div id="modal_amount_badge" style="font-size:1.8rem; font-weight:800; color:#0f172a; margin-top:0.15rem; line-height:1.2;">
+                            ৳ 5,000.00
+                        </div>
+                        <div id="modal_type_badge" style="margin-top:0.35rem;">
+                            <span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700; font-size:0.8rem; padding:0.4rem 0.8rem;">Money Donation</span>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h4 style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin-bottom:0.35rem; font-weight:700; margin-top:0;">Transaction Reference</h4>
+                        <p style="font-size:0.88rem; color:#334155; margin:0 0 0.35rem 0;">
+                            Method: <strong id="modal_method" style="color:#0f172a;">bKash</strong>
+                        </p>
+                        <p style="font-size:0.88rem; color:#334155; margin:0;">
+                            Txn ID: <code id="modal_txn" style="font-size:0.85rem; background:#f1f5f9; padding:0.25rem 0.5rem; border-radius:6px; color:#475569; font-family:monospace; font-weight:600;">BKASH-MOCK-TXN-12345</code>
+                        </p>
+                    </div>
+
+                    <!-- Supply pickup details panel (conditionally displayed by JS) -->
+                    <div id="modal_supply_logistics" style="display:none; background:#f0fdf4; border:1px solid #bbf7d0; padding:0.85rem; border-radius:14px; text-align:left;">
+                        <h4 style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#166534; margin-bottom:0.35rem; font-weight:700; margin-top:0;">Logistics & Delivery</h4>
+                        <p style="font-size:0.85rem; color:#14532d; margin:0 0 0.25rem 0;">
+                            Method: <strong id="modal_delivery_method">Pick up Service</strong>
+                        </p>
+                        <p style="font-size:0.85rem; color:#14532d; margin:0 0 0.25rem 0;">
+                            Phone: <strong id="modal_pickup_phone">+88017...</strong>
+                        </p>
+                        <p style="font-size:0.85rem; color:#14532d; margin:0; line-height:1.4;">
+                            Address: <span id="modal_pickup_address" style="font-weight:600;">123 Camp Road, Sylhet</span>
+                        </p>
+                    </div>
+
+                    <div>
+                        <h4 style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin-bottom:0.35rem; font-weight:700; margin-top:0;">Status Details</h4>
+                        <p style="font-size:0.88rem; color:#334155; display:flex; align-items:center; gap:0.5rem; margin:0 0 0.35rem 0;">
+                            Date: <strong id="modal_date" style="color:#0f172a;">May 21, 2026</strong>
+                        </p>
+                        <p style="font-size:0.88rem; color:#334155; margin:0; display:flex; align-items:center; gap:0.5rem;">
+                            Status: <span id="modal_status_badge" class="badge active">Completed</span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer: Interactive forms for actions if pending -->
+            <div id="modal_actions_section" style="border-top:1px solid #f1f5f9; padding:1.25rem 1.5rem; background:#f8fafc; display:none; border-bottom-left-radius:24px; border-bottom-right-radius:24px;">
+                <div id="modal_supplies_allocation_help" style="display:none; background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; padding:0.75rem 1rem; border-radius:12px; font-size:0.85rem; line-height:1.4; margin-bottom:1rem; text-align:left;">
+                    💡 <strong>Inventory Camp Assignment:</strong> Please choose which Camp inventory this supply donation will be delivered to. Once approved, the stock quantity will increase instantly.
+                </div>
+                
+                <form id="modal_approval_form" method="POST" style="margin:0; text-align:left;">
+                    <input type="hidden" name="action" value="approve_donation">
+                    <input type="hidden" name="donation_id" id="modal_donation_id">
+                    
+                    <div class="form-field" id="modal_camp_selection_field" style="margin-bottom:1.25rem;">
+                        <label style="font-weight:700; color:#334155; font-size:0.88rem; display:block; margin-bottom:0.5rem;">Allocate / Assign to Camp's Stock</label>
+                        <select name="camp_id" id="modal_camp_id" style="border-radius:12px; border:1px solid #cbd5e1; padding:0.75rem; font-size:0.9rem; width:100%; display:block; background:#ffffff;" required>
+                            <option value="">Select a Camp for Stock Delivery</option>
+                            <?php foreach ($camps as $c): ?>
+                                <option value="<?php echo $c['id']; ?>"><?php echo htmlspecialchars($c['camp_name']) . " (" . htmlspecialchars($c['location']) . ")"; ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    
+                    <div style="display:flex; gap:0.75rem; align-items:center; justify-content:stretch;">
+                        <button type="submit" class="btn-primary" style="flex:2; background:#22c55e; color:white; border:none; padding:0.85rem 1.5rem; font-size:0.95rem; border-radius:14px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; gap:0.5rem; cursor:pointer; transition:all 0.25s;" onmouseover="this.style.background='#16a34a'" onmouseout="this.style.background='#22c55e'">
+                            ✓ Approve & Update Inventory
+                        </button>
+                </form>
+                
+                <form id="modal_reject_form" method="POST" style="margin:0; flex:1;">
+                    <input type="hidden" name="action" value="reject_donation">
+                    <input type="hidden" name="donation_id" id="modal_reject_donation_id">
+                    <button type="submit" class="btn-danger" style="width:100%; border:none; padding:0.85rem 1.5rem; font-size:0.95rem; border-radius:14px; font-weight:700; text-align:center; cursor:pointer; transition:all 0.25s; display:inline-flex; align-items:center; justify-content:center;" onclick="return confirm('Are you sure you want to reject/fail this donation request?');">
+                        Reject Donation
+                    </button>
+                </form>
+                    </div>
+            </div>
+
+            <!-- Footer Section if already processed -->
+            <div id="modal_processed_note" style="border-top:1px solid #f1f5f9; padding:1rem 1.5rem; background:#f8fafc; display:none; text-align:center; border-bottom-left-radius:24px; border-bottom-right-radius:24px;">
+                <div style="background:#f1f5f9; border:1px solid #e2e8f0; color:#64748b; padding:0.6rem 1.25rem; border-radius:10px; font-size:0.85rem; font-weight:600; display:inline-flex; align-items:center; gap:0.5rem;">
+                    🔒 This donation record has already been finalized and is read-only.
+                </div>
+            </div>
+
+            <div style="display:flex; justify-content:flex-end; padding:1.25rem 1.5rem; border-top:1px solid #f1f5f9; background:#ffffff; border-bottom-left-radius:24px; border-bottom-right-radius:24px;">
+                <button type="button" class="btn-secondary" style="padding:0.65rem 1.5rem; border-radius:12px; font-weight:700; font-size:0.9rem;" onclick="closeDonationDetailsModal()">Close Window</button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        @keyframes modalFadeIn {
+            from { opacity: 0; transform: scale(0.97) translateY(10px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+    </style>
+
+    <script>
+        function openDonationDetailsModal(donation) {
+            console.log("Opening donation details modal", donation);
+            
+            // Set header icon
+            const isMoney = donation.donation_type === 'money';
+            document.getElementById('modal_header_icon').textContent = isMoney ? '💵' : '🎁';
+            
+            // Set donor details
+            const name = donation.donor_name || 'Guest Donor';
+            document.getElementById('modal_donor_name').textContent = name;
+            document.getElementById('modal_donor_avatar').textContent = name.trim().charAt(0).toUpperCase();
+            document.getElementById('modal_donor_email').textContent = donation.donor_email || 'N/A';
+            document.getElementById('modal_donor_phone').textContent = donation.donor_phone || 'N/A';
+            
+            // Set campaign
+            document.getElementById('modal_campaign').textContent = donation.campaign_name || 'General Relief Fund';
+            
+            // Set note/message
+            const messageBox = document.getElementById('modal_message_box');
+            if (donation.message && donation.message.trim()) {
+                messageBox.textContent = `"${donation.message}"`;
+                messageBox.parentElement.style.display = 'block';
+            } else {
+                messageBox.parentElement.style.display = 'none';
+            }
+            
+            // Set amount & type badges
+            const amountBadge = document.getElementById('modal_amount_badge');
+            const typeBadge = document.getElementById('modal_type_badge');
+            if (isMoney) {
+                amountBadge.textContent = '৳ ' + parseFloat(donation.amount).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                typeBadge.innerHTML = '<span class="badge" style="background:#ecfdf5; color:#065f46; font-weight:700; font-size:0.8rem; padding:0.4rem 0.8rem; border-radius:999px;">💵 Money Contribution</span>';
+            } else {
+                amountBadge.textContent = parseInt(donation.amount) + ' ' + (donation.item_name || 'Items');
+                typeBadge.innerHTML = '<span class="badge" style="background:#eff6ff; color:#1e40af; font-weight:700; font-size:0.8rem; padding:0.4rem 0.8rem; border-radius:999px;">🎁 Supplies Contribution</span>';
+            }
+            
+            // Set reference/txn
+            document.getElementById('modal_method').textContent = donation.payment_method || 'N/A';
+            document.getElementById('modal_txn').textContent = donation.transaction_id || 'N/A';
+            
+            // Set Logistics/Pickup details for supplies
+            const logisticsPanel = document.getElementById('modal_supply_logistics');
+            if (!isMoney && (donation.pickup_address || donation.pickup_phone || donation.supply_delivery_method)) {
+                logisticsPanel.style.display = 'block';
+                document.getElementById('modal_delivery_method').textContent = donation.supply_delivery_method === 'pickup' ? 'Pick up Service' : 'Camp Dropoff';
+                document.getElementById('modal_pickup_phone').textContent = donation.pickup_phone || 'N/A';
+                document.getElementById('modal_pickup_address').textContent = donation.pickup_address || 'N/A';
+            } else {
+                logisticsPanel.style.display = 'none';
+            }
+            
+            // Set date & status badges
+            const options = { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+            const formattedDate = new Date(donation.created_at).toLocaleDateString('en-US', options);
+            document.getElementById('modal_date').textContent = formattedDate;
+            
+            const statusBadge = document.getElementById('modal_status_badge');
+            statusBadge.textContent = donation.status.charAt(0).toUpperCase() + donation.status.slice(1);
+            statusBadge.className = 'badge ' + (donation.status === 'completed' ? 'active' : (donation.status === 'pending' ? 'inactive' : 'btn-danger'));
+            if (donation.status === 'failed') {
+                statusBadge.style.cssText = 'background:#fef2f2; color:#ef4444; font-weight:700; border-radius:999px;';
+            } else {
+                statusBadge.style.cssText = 'border-radius:999px;';
+            }
+            
+            // Toggle interactive forms if pending
+            const actionsSection = document.getElementById('modal_actions_section');
+            const processedNote = document.getElementById('modal_processed_note');
+            
+            if (donation.status === 'pending') {
+                actionsSection.style.display = 'block';
+                processedNote.style.display = 'none';
+                
+                // Form setup
+                document.getElementById('modal_donation_id').value = donation.id;
+                document.getElementById('modal_reject_donation_id').value = donation.id;
+                
+                // Pre-populate camp drop-down if camp_id is set
+                const campDropdown = document.getElementById('modal_camp_id');
+                if (donation.camp_id) {
+                    campDropdown.value = donation.camp_id;
+                } else {
+                    campDropdown.value = "";
+                }
+                
+                // Toggle extra info for supply assignment help & require/hide field depending on type
+                const helpInfo = document.getElementById('modal_supplies_allocation_help');
+                const campSelectField = document.getElementById('modal_camp_selection_field');
+                
+                if (donation.donation_type === 'supplies') {
+                    helpInfo.style.display = 'block';
+                    campSelectField.style.display = 'block';
+                    campDropdown.required = true;
+                } else {
+                    helpInfo.style.display = 'none';
+                    campSelectField.style.display = 'none';
+                    campDropdown.required = false;
+                }
+            } else {
+                actionsSection.style.display = 'none';
+                processedNote.style.display = 'block';
+            }
+            
+            document.getElementById('donationDetailsModal').style.display = 'grid';
+        }
+
+        function closeDonationDetailsModal() {
+            document.getElementById('donationDetailsModal').style.display = 'none';
+        }
+    </script>
 </body>
 </html>
 <?php $conn->close(); ?>
