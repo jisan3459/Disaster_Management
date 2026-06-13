@@ -12,7 +12,7 @@ if ($user_role !== 'camp_manager') {
     } elseif ($user_role === 'volunteer') {
         redirect('volunteer_dashboard.php');
     }
-    redirect('index.php');
+    redirect('index.php');   
 }
 
 $user_id = $_SESSION['user_id'];
