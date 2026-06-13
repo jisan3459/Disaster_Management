@@ -12,3 +12,11 @@ def generate_dataset(filename, num_records=1000):
     ]
 
     start_date = datetime(2025, 1, 1)
+    with open(filename, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(headers)
+
+        for i in range(num_records):
+            # Random date within the last year
+            current_date = start_date + timedelta(days=random.randint(0, 365))
+            camp_id = random.randint(1, 5)
