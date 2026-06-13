@@ -1,6 +1,6 @@
 <?php
 // Include database configuration and establish connection
-require_once 'config.php';
+require_once '/config';
 
 // Check if user is logged in
 $is_logged_in = isLoggedIn();
@@ -59,6 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $insert_donation = "INSERT INTO donations (donor_id, campaign_id, amount, donation_type, status) 
                                VALUES ($donor_id, $campaign_clause, $amount, '$donation_type', 'pending')";
             
+            if ($conn->query($insert_donation)) {
             if ($conn->query($insert_donation)) {
                 $donation_success = true;
                 $success_message = "Thank you for your donation of \$$amount! Your contribution is now pending verification and will make a real difference once approved.";
@@ -532,37 +533,37 @@ while ($row = $urgent_result->fetch_assoc()) {
 <body>
 
     <header>
-        <a href="index.php" class="logo">
+        <a href="/index" class="logo">
             <i class="fa-solid fa-shield-halved"></i> Relief System
         </a>
         <nav>
-            <a href="index.php">Home</a>
+            <a href="/index">Home</a>
             <?php if ($is_logged_in): ?>
                 <?php if ($user_role === 'admin'): ?>
-                    <a href="admin_dashboard.php">Dashboard</a>
+                    <a href="/admin_dashboard">Dashboard</a>
                 <?php elseif ($user_role === 'camp_manager'): ?>
-                    <a href="camp_manager_dashboard.php">Dashboard</a>
+                    <a href="/camp_manager_dashboard">Dashboard</a>
                 <?php elseif ($user_role === 'volunteer'): ?>
-                    <a href="volunteer_dashboard.php">Dashboard</a>
+                    <a href="/volunteer_dashboard">Dashboard</a>
                 <?php elseif ($user_role === 'donor'): ?>
-                    <a href="donor_dashboard.php">Dashboard</a>
+                    <a href="/donor_dashboard">Dashboard</a>
                 <?php endif; ?>
             <?php endif; ?>
-            <a href="index.php#about">About</a>
-            <a href="campaigns.php">Campaigns</a>
-            <a href="donate.php" class="active">Donate</a>
-            <a href="index.php#emergency">Emergency</a>
-            <a href="index.php#contact">Contact</a>
+            <a href="/index#about">About</a>
+            <a href="/campaigns">Campaigns</a>
+            <a href="/donate" class="active">Donate</a>
+            <a href="/index#emergency">Emergency</a>
+            <a href="/index#contact">Contact</a>
         </nav>
         <?php if ($is_logged_in): ?>
             <div style="display: flex; align-items: center; gap: 1rem;">
                 <span style="color: var(--text-dark); font-size: 0.9rem; font-weight: 500;">Welcome, <?php echo htmlspecialchars(explode(' ', $user_name)[0]); ?></span>
-                <a href="logout.php" class="btn-login">Logout</a>
+                <a href="/logout" class="btn-login">Logout</a>
             </div>
         <?php else: ?>
             <div style="display: flex; gap: 0.5rem;">
-                <a href="signin.php" class="btn-login">Login</a>
-                <a href="signup.php" style="background-color: var(--primary-blue); color: white; padding: 0.5rem 1.2rem; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 600;">Register</a>
+                <a href="/signin" class="btn-login">Login</a>
+                <a href="/signup" style="background-color: var(--primary-blue); color: white; padding: 0.5rem 1.2rem; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 600;">Register</a>
             </div>
         <?php endif; ?>
     </header>
@@ -590,7 +591,8 @@ while ($row = $urgent_result->fetch_assoc()) {
         <div class="donation-container">
             <div class="donation-form-flow">
                 
-                <form method="POST" action="donate.php">
+                <form method="POST" action="/donate">
+                    @csrf
                 
                 <div class="card-panel">
                     <h3 class="panel-heading">Choose Donation Type</h3>
@@ -749,20 +751,20 @@ while ($row = $urgent_result->fetch_assoc()) {
             <div class="footer-column">
                 <h4>Quick Links</h4>
                 <ul>
-                    <li><a href="index.php">Home</a></li>
-                    <li><a href="admin_dashboard.php">Live Dashboard</a></li>
-                    <li><a href="index.php#about">About Us</a></li>
-                    <li><a href="campaigns.php">Campaigns</a></li>
-                    <li><a href="index.php#contact">Contact</a></li>
+                    <li><a href="/index">Home</a></li>
+                    <li><a href="/admin_dashboard">Live Dashboard</a></li>
+                    <li><a href="/index#about">About Us</a></li>
+                    <li><a href="/campaigns">Campaigns</a></li>
+                    <li><a href="/index#contact">Contact</a></li>
                 </ul>
             </div>
             <div class="footer-column">
                 <h4>Get Involved</h4>
                 <ul>
-                    <li><a href="donate.php">Make a Donation</a></li>
-                    <li><a href="signup.php">Volunteer</a></li>
-                    <li><a href="signup.php">Need Help?</a></li>
-                    <li><a href="index.php">Partner With Us</a></li>
+                    <li><a href="/donate">Make a Donation</a></li>
+                    <li><a href="/signup">Volunteer</a></li>
+                    <li><a href="/signup">Need Help?</a></li>
+                    <li><a href="/index">Partner With Us</a></li>
                 </ul>
             </div>
             <div class="footer-column">

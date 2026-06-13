@@ -29,3 +29,13 @@ foreach ($pages as $page) {
         return view($page);
     });
 }
+
+Route::any('/{page}.php', function ($page) {
+    if ($page === 'index') {
+        return view('welcome');
+    }
+    if (view()->exists($page)) {
+        return view($page);
+    }
+    abort(404);
+});
