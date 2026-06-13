@@ -56,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['affected_id']   = $id;
         $_SESSION['affected_name'] = $name;
         $_SESSION['affected_key']  = $key;
-        echo json_encode(['success' => true, 'key' => $key, 'redirect' => 'affected_dashboard.php']);
+        echo json_encode(['success' => true, 'key' => $key, 'redirect' => '/affected_dashboard']);
     } else {
         echo json_encode(['success' => false, 'message' => 'DB error']);
     }

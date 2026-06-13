@@ -1,10 +1,10 @@
 <?php
 session_start();
-include 'config.php';
+include base_path('../config.php');
 
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
-    redirect('signin.php');
+    php_redirect('/signin');
 }
 
 // Get user info
@@ -13,7 +13,7 @@ $user_role = $_SESSION['role'];
 
 // Verify user is volunteer or admin
 if ($user_role !== 'volunteer' && $user_role !== 'admin' && $user_role !== 'camp_manager') {
-    redirect('index.php');
+    php_redirect('/index');
 }
 
 // Get user details
@@ -23,25 +23,7 @@ $user = $user_query->fetch_assoc();
 // Get notifications count
 $notifications_query = $conn->query("SELECT COUNT(*) as count FROM notifications WHERE user_id = $user_id AND is_read = 0");
 $notifications = $notifications_query->fetch_assoc();
-$unread_count = $notifications['count'] ?? 0;
-
-// Get unread chat count
-$unread_chat_query = $conn->query("SELECT COUNT(*) FROM messages WHERE receiver_id = $user_id AND is_read = 0");
-$unread_chat = ($unread_chat_query && $unread_chat_query->num_rows > 0) ? $unread_chat_query->fetch_row()[0] : 0;
-
-$all_notifications_query = $conn->query("SELECT * FROM notifications WHERE user_id = $user_id ORDER BY created_at DESC LIMIT 5");
-$all_notifications = [];
-if ($all_notifications_query) {
-    while ($n = $all_notifications_query->fetch_assoc()) {
-        $all_notifications[] = $n;
-    }
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'mark_notifications_read') {
-    $conn->query("UPDATE notifications SET is_read = 1 WHERE user_id = $user_id");
-    header("Location: volunteer_dashboard.php?page=" . ($_GET['page'] ?? 'dashboard'));
-    exit();
-}
+$unread_count = $notifications['count'];
 
 // API Endpoint for Notifications
 if (isset($_GET['api']) && $_GET['api'] === 'check_notifications') {
@@ -125,7 +107,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $stmt->bind_param("sii", $new_status, $task_id, $user_id);
             
             if ($stmt->execute()) {
-                header("Location: volunteer_dashboard.php?page=" . $page);
+                header("Location: /volunteer_dashboard?page=" . $page);
                 exit();
             }
         }
@@ -143,7 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         
         if ($stmt->execute()) {
             $_SESSION['success_msg'] = "Report submitted successfully!";
-            header("Location: volunteer_dashboard.php?page=field_reports");
+            header("Location: /volunteer_dashboard?page=field_reports");
             exit();
         } else {
             $error_msg = "Error submitting report: " . $conn->error;
@@ -166,19 +148,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         
         if ($stmt->execute()) {
             $_SESSION['success_msg'] = "Task created successfully!";
-            header("Location: volunteer_dashboard.php?page=tasks");
+            header("Location: /volunteer_dashboard?page=tasks");
             exit();
 
         } else {
             $error_msg = "Error creating task: " . $conn->error;
-        }
-    } elseif ($_POST['action'] === 'send_chat_message') {
-        $receiver_id = intval($_POST['receiver_id']);
-        $msg = sanitize($_POST['message'] ?? '');
-        if ($msg && $receiver_id) {
-            $conn->query("INSERT INTO messages (sender_id, receiver_id, message_text) VALUES ($user_id, $receiver_id, '$msg')");
-            header("Location: volunteer_dashboard.php?page=chat&user_id=$receiver_id");
-            exit();
         }
     }
 }
@@ -1049,13 +1023,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             </div>
             <ul class="sidebar-menu">
                 <li>
-                    <a href="volunteer_dashboard.php?page=dashboard" class="<?php echo ($page === 'dashboard') ? 'active' : ''; ?>">
+                    <a href="/volunteer_dashboard?page=dashboard" class="<?php echo ($page === 'dashboard') ? 'active' : ''; ?>">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
                         Dashboard
                     </a>
                 </li>
                 <li>
-                    <a href="volunteer_dashboard.php?page=tasks" class="<?php echo ($page === 'tasks') ? 'active' : ''; ?>">
+                    <a href="/volunteer_dashboard?page=tasks" class="<?php echo ($page === 'tasks') ? 'active' : ''; ?>">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect><line x1="9" y1="12" x2="15" y2="12"></line><line x1="9" y1="16" x2="15" y2="16"></line><line x1="9" y1="8" x2="15" y2="8"></line></svg>
                         My Tasks
                         <?php if ($stats['pending'] > 0 || $stats['in_progress'] > 0): ?>
@@ -1063,26 +1037,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         <?php endif; ?>
                     </a>
                 </li>
-
                 <li>
-                    <a href="volunteer_dashboard.php?page=supplies" class="<?php echo ($page === 'supplies') ? 'active' : ''; ?>">
+                    <a href="/volunteer_dashboard?page=schedule" class="<?php echo ($page === 'schedule') ? 'active' : ''; ?>">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                        Schedule
+                    </a>
+                </li>
+                <li>
+                    <a href="/volunteer_dashboard?page=supplies" class="<?php echo ($page === 'supplies') ? 'active' : ''; ?>">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
                         Supplies Delivered
                     </a>
                 </li>
                 <li>
-                    <a href="volunteer_dashboard.php?page=field_reports" class="<?php echo ($page === 'field_reports') ? 'active' : ''; ?>">
+                    <a href="/volunteer_dashboard?page=field_reports" class="<?php echo ($page === 'field_reports') ? 'active' : ''; ?>">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
                         Field Reports
                     </a>
                 </li>
                 <li>
-                    <a href="volunteer_dashboard.php?page=chat" class="<?php echo ($page === 'chat') ? 'active' : ''; ?>">
+                    <a href="/volunteer_dashboard?page=chat" class="<?php echo ($page === 'chat') ? 'active' : ''; ?>">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
                         Messages
-                        <?php if ($unread_chat > 0): ?>
-                            <span class="menu-badge" style="background: #ef4444;"><?php echo $unread_chat; ?></span>
-                        <?php endif; ?>
+                    </a>
+                </li>
+                <li>
+                    <a href="/volunteer_dashboard?page=settings" class="<?php echo ($page === 'settings') ? 'active' : ''; ?>">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                        Settings
                     </a>
                 </li>
             </ul>
@@ -1096,36 +1078,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     <h2 style="color: #1a1a1a;">DisasterRelief</h2>
                 </div>
                 <div class="header-right">
-                    <div class="notification-bell" onclick="document.getElementById('notifDropdownVol').classList.toggle('show')">
+                    <div class="notification-bell">
                         🔔
                         <?php if ($unread_count > 0): ?>
                             <span class="notification-badge"><?php echo $unread_count; ?></span>
                         <?php endif; ?>
-                        
-                        <div id="notifDropdownVol" class="dropdown-menu" style="width: 320px; right: -50px; padding: 0;">
-                            <div style="padding: 1.25rem; border-bottom: 1px solid #f3f4f6; background: #f8fafc; text-align: left;">
-                                <p style="font-weight: 700; font-size: 0.95rem; color: #0f172a; margin: 0;">Notifications</p>
-                            </div>
-                            <?php if (empty($all_notifications)): ?>
-                                <div style="padding: 1.5rem; text-align: center; color: #6b7280; font-size: 0.9rem;">No new notifications</div>
-                            <?php else: ?>
-                                <div style="max-height: 300px; overflow-y: auto; text-align: left;">
-                                    <?php foreach ($all_notifications as $notif): ?>
-                                        <div style="padding: 1rem; border-bottom: 1px solid #f3f4f6; background: <?php echo $notif['is_read'] ? '#ffffff' : '#eff6ff'; ?>;">
-                                            <div style="font-weight: 700; font-size: 0.85rem; color: #111827;"><?php echo htmlspecialchars($notif['title']); ?></div>
-                                            <div style="font-size: 0.8rem; color: #4b5563; margin-top: 0.25rem;"><?php echo htmlspecialchars($notif['message']); ?></div>
-                                            <div style="font-size: 0.7rem; color: #9ca3af; margin-top: 0.5rem;"><?php echo date('M d, H:i', strtotime($notif['created_at'])); ?></div>
-                                        </div>
-                                    <?php endforeach; ?>
-                                </div>
-                                <div style="padding: 0.75rem; text-align: center; border-top: 1px solid #e5e7eb; background: #f9fafb;">
-                                    <form method="POST" style="margin: 0;">
-                                        <input type="hidden" name="action" value="mark_notifications_read">
-                                        <button type="submit" style="background: none; border: none; color: #2563eb; font-size: 0.85rem; font-weight: 700; cursor: pointer;">Mark all as read</button>
-                                    </form>
-                                </div>
-                            <?php endif; ?>
-                        </div>
                     </div>
                     <div class="profile-dropdown">
                         <button type="button" class="dropdown-button" onclick="toggleProfileMenu()">
@@ -1136,8 +1093,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             </div>
                         </button>
                         <div class="dropdown-menu" id="volProfileMenu">
-                            <a href="volunteer_dashboard.php?page=profile">Profile</a>
-                            <a href="logout.php" class="danger">Logout</a>
+                            <a href="/volunteer_dashboard?page=profile">Profile</a>
+                            <a href="/volunteer_dashboard?page=settings">Settings</a>
+                            <a href="/logout" class="danger">Logout</a>
                         </div>
                     </div>
                 </div>
@@ -1405,6 +1363,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             </div>
                         </div>
                     </div>
+                <?php elseif ($page === 'settings'): ?>
+                    <div style="text-align:center; margin-bottom:2rem;">
+                        <h1 class="page-title">Settings</h1>
+                        <p class="page-subtitle">Configure your volunteer account preferences</p>
+                    </div>
+                    <div class="form-container">
+                        <div class="form-section"><h3>Notification Preferences</h3><p>Receive alerts when new tasks or messages arrive.</p></div>
+                        <div class="form-section"><h3>Privacy</h3><p>Your profile information remains protected.</p></div>
+                        <div class="form-section"><h3>Account</h3><p>Logout will return you safely to the sign in page.</p></div>
+                    </div>
+                <?php elseif ($page === 'schedule'): ?>
+                    <!-- Schedule Page -->
+                    <h1 class="page-title">My Schedule</h1>
+                    <p class="page-subtitle">View your volunteer shift schedule</p>
+                    
+                    <div class="card" style="padding: 2.5rem; background: white; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                        <h3 style="margin-bottom: 2rem; color: #1e293b; font-size: 1.25rem;">Weekly Shifts</h3>
+                        <div style="display: flex; flex-direction: column; gap: 1.25rem;">
+                            <?php
+                            $schedule_query = $conn->query("SELECT * FROM schedules WHERE user_id = $user_id ORDER BY FIELD(day_of_week, 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')");
+                            if ($schedule_query->num_rows === 0):
+                            ?>
+                                <div style="text-align: center; padding: 3rem; color: #94a3b8; border: 2px dashed #e2e8f0; border-radius: 12px;">
+                                    <div style="font-size: 2.5rem; margin-bottom: 1rem;">📅</div>
+                                    <p>No shifts scheduled yet.</p>
+                                </div>
+                            <?php else: ?>
+                                <?php while ($shift = $schedule_query->fetch_assoc()): ?>
+                                    <div style="padding: 1.5rem; border: 1px solid #e2e8f0; border-radius: 16px; display: flex; align-items: center; gap: 1.5rem; transition: all 0.2s; background: #fff;" onmouseover="this.style.transform='translateX(8px)'; this.style.borderColor='#3b82f6'" onmouseout="this.style.transform='translateX(0)'; this.style.borderColor='#e2e8f0'">
+                                        <div style="font-size: 1.5rem; background: #eff6ff; color: #2563eb; width: 56px; height: 56px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                                            📅
+                                        </div>
+                                        <div style="flex: 1;">
+                                            <div style="font-weight: 700; color: #1e293b; font-size: 1.15rem;"><?php echo $shift['day_of_week']; ?></div>
+                                            <div style="display: flex; gap: 1.5rem; margin-top: 4px; color: #64748b; font-size: 0.95rem;">
+                                                <span>🕒 <?php echo date('h:i A', strtotime($shift['start_time'])) . ' - ' . date('h:i A', strtotime($shift['end_time'])); ?></span>
+                                                <span>📍 <?php echo htmlspecialchars($shift['location'] ?: $camp_name); ?></span>
+                                            </div>
+                                        </div>
+                                        <div style="background: #dcfce7; color: #15803d; padding: 0.4rem 1rem; border-radius: 20px; font-size: 0.8rem; font-weight: 600;">Active</div>
+                                    </div>
+                                <?php endwhile; ?>
+                            <?php endif; ?>
+                        </div>
+                    </div>
 
                 <?php elseif ($page === 'supplies'): ?>
                     <!-- Supplies Delivered Page -->
@@ -1458,7 +1461,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             <h1 class="page-title">Field Reports</h1>
                             <p class="page-subtitle">Your submitted activity and incident reports</p>
                         </div>
-                        <button class="btn btn-primary" style="padding: 0.8rem 1.5rem; border-radius: 12px; background: #2563eb;" onclick="location.href='volunteer_dashboard.php?page=report'">+ Create New Report</button>
+                        <button class="btn btn-primary" style="padding: 0.8rem 1.5rem; border-radius: 12px; background: #2563eb;" onclick="location.href='/volunteer_dashboard?page=report'">+ Create New Report</button>
                     </div>
 
                     <?php if (isset($_SESSION['success_msg'])): ?>
@@ -1509,129 +1512,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 <?php elseif ($page === 'chat'): ?>
                     <!-- Chat Page (Messages) -->
                     <h1 class="page-title">Messages</h1>
-                    <p class="page-subtitle">Communicate with System Admins and your Camp Manager</p>
-
-                    <?php
-                    // Get list of contacts: all admins and the manager of the assigned camp (if any)
-                    $contact_users_query = "
-                        SELECT u.id, u.full_name, u.role,
-                            (SELECT message_text FROM messages WHERE (sender_id=u.id OR receiver_id=u.id) AND (sender_id=$user_id OR receiver_id=$user_id) ORDER BY created_at DESC LIMIT 1) as last_msg,
-                            (SELECT created_at FROM messages WHERE (sender_id=u.id OR receiver_id=u.id) AND (sender_id=$user_id OR receiver_id=$user_id) ORDER BY created_at DESC LIMIT 1) as last_msg_time,
-                            (SELECT COUNT(*) FROM messages WHERE sender_id=u.id AND receiver_id=$user_id AND is_read=0) as unread_count
-                        FROM users u
-                        LEFT JOIN camps c ON u.id = c.manager_id
-                        WHERE u.role = 'admin'
-                           " . ($camp_id ? "OR (u.role = 'camp_manager' AND c.id = $camp_id)" : "") . "
-                        ORDER BY COALESCE(last_msg_time, '1970-01-01') DESC, u.full_name ASC
-                    ";
-                    $chat_users = $conn->query($contact_users_query);
-                    $contacts_list = [];
-                    if ($chat_users) {
-                        while ($cu = $chat_users->fetch_assoc()) {
-                            $contacts_list[] = $cu;
-                        }
-                    }
-
-                    $chat_user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
-                    if ($chat_user_id == 0 && !empty($contacts_list)) {
-                        $chat_user_id = $contacts_list[0]['id'];
-                    }
-
-                    $target_user = null;
-                    if ($chat_user_id > 0) {
-                        $target_user_query = $conn->query("SELECT * FROM users WHERE id = $chat_user_id");
-                        if ($target_user_query) {
-                            $target_user = $target_user_query->fetch_assoc();
-                        }
-                    }
-                    ?>
+                    <p class="page-subtitle">Direct communication with your supervisor</p>
 
                     <div class="chat-container">
                         <!-- Chat List -->
                         <div class="chat-list">
-                            <?php if (!empty($contacts_list)): ?>
-                                <?php foreach ($contacts_list as $cu): ?>
-                                    <div class="chat-item <?php echo ($cu['id'] == $chat_user_id) ? 'active' : ''; ?>" onclick="location.href='volunteer_dashboard.php?page=chat&user_id=<?php echo $cu['id']; ?>'">
-                                        <div class="chat-item-name"><?php echo htmlspecialchars($cu['full_name']); ?></div>
-                                        <div class="chat-item-status" style="font-size: 0.75rem; color: #64748b; margin-top: 2px;">
-                                            <?php echo ucfirst(str_replace('_', ' ', $cu['role'])); ?>
-                                            <?php if ($cu['unread_count'] > 0): ?>
-                                                <span style="background: #ef4444; color: white; padding: 1px 5px; border-radius: 999px; font-size: 0.65rem; font-weight: bold; margin-left: 5px; float: right;"><?php echo $cu['unread_count']; ?></span>
-                                            <?php endif; ?>
-                                        </div>
-                                        <?php if ($cu['last_msg']): ?>
-                                            <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                                                <?php echo htmlspecialchars($cu['last_msg']); ?>
-                                            </div>
-                                        <?php endif; ?>
-                                    </div>
-                                <?php endforeach; ?>
-                            <?php else: ?>
-                                <div style="padding: 1.5rem; text-align: center; color: #94a3b8; font-size: 0.9rem;">
-                                    No contacts available.
-                                </div>
-                            <?php endif; ?>
+                            <div class="chat-item active">
+                                <div class="chat-item-name">Karim Ahmed</div>
+                                <div class="chat-item-status">🟢 Online - Camp Manager</div>
+                            </div>
                         </div>
 
                         <!-- Chat Window -->
                         <div class="chat-window">
-                            <?php if ($target_user): 
-                                // Mark messages as read
-                                $conn->query("UPDATE messages SET is_read = 1 WHERE sender_id = $chat_user_id AND receiver_id = $user_id AND is_read = 0");
-                                
-                                // Fetch messages
-                                $messages = $conn->query("SELECT * FROM messages WHERE (sender_id = $user_id AND receiver_id = $chat_user_id) OR (sender_id = $chat_user_id AND receiver_id = $user_id) ORDER BY created_at ASC");
-                            ?>
-                                <div style="padding: 1rem; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; justify-content: space-between; background: #fff;">
-                                    <div>
-                                        <h3 style="font-size: 1rem; font-weight: 700; color: #0f172a;"><?php echo htmlspecialchars($target_user['full_name']); ?></h3>
-                                        <span class="badge active" style="font-size:0.7rem; padding: 2px 8px; background: #eff6ff; color: #3b82f6; border-radius: 999px; font-weight: 600;"><?php echo ucfirst(str_replace('_', ' ', $target_user['role'])); ?></span>
+                            <!-- Messages -->
+                            <div class="chat-messages">
+                                <div class="message">
+                                    <div class="message-avatar">KA</div>
+                                    <div class="message-content">
+                                        <div class="message-text">Great work on today's distribution!</div>
+                                        <div class="message-time">11:00 AM</div>
                                     </div>
                                 </div>
 
-                                <!-- Messages -->
-                                <div class="chat-messages" id="chatContainer">
-                                    <?php if ($messages && $messages->num_rows > 0): ?>
-                                        <?php while ($msg = $messages->fetch_assoc()): 
-                                            $is_me = ($msg['sender_id'] == $user_id);
-                                        ?>
-                                            <div class="message <?php echo $is_me ? 'sent' : ''; ?>">
-                                                <?php if (!$is_me): ?>
-                                                    <div class="message-avatar">
-                                                        <?php echo strtoupper(substr($target_user['full_name'], 0, 1)); ?>
-                                                    </div>
-                                                <?php endif; ?>
-                                                <div class="message-content">
-                                                    <div class="message-text">
-                                                        <?php echo htmlspecialchars($msg['message_text']); ?>
-                                                    </div>
-                                                    <div class="message-time" style="<?php echo $is_me ? 'text-align: right;' : ''; ?>">
-                                                        <?php echo date('M d, h:i A', strtotime($msg['created_at'])); ?>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        <?php endwhile; ?>
-                                    <?php else: ?>
-                                        <div style="text-align: center; color: #94a3b8; font-size: 0.9rem; margin-top: auto; margin-bottom: auto;">
-                                            No messages yet. Start the conversation.
-                                        </div>
-                                    <?php endif; ?>
+                                <div class="message">
+                                    <div class="message-avatar">KA</div>
+                                    <div class="message-content">
+                                        <div class="message-text">I have a new task for you</div>
+                                        <div class="message-time">11:10 AM</div>
+                                    </div>
                                 </div>
 
-                                <!-- Chat Input -->
-                                <form method="POST" style="margin: 0;">
-                                    <input type="hidden" name="action" value="send_chat_message">
-                                    <input type="hidden" name="receiver_id" value="<?php echo $chat_user_id; ?>">
-                                    <div class="chat-input">
-                                        <input type="text" name="message" placeholder="Type your message..." required autocomplete="off" autofocus>
-                                        <button type="submit">Send</button>
+                                <div class="message sent">
+                                    <div class="message-content">
+                                        <div class="message-text">Thank you! Completed 15 families</div>
+                                        <div class="message-time">11:25 AM</div>
                                     </div>
-                                </form>
-                            <?php else: ?>
-                                <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #94a3b8;">
-                                    Select a user to start chatting.
                                 </div>
-                            <?php endif; ?>
+
+                                <div class="message sent">
+                                    <div class="message-content">
+                                        <div class="message-text">Sure, I'm ready for the next task!</div>
+                                        <div class="message-time">11:35 AM</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Chat Input -->
+                            <div class="chat-input">
+                                <input type="text" placeholder="Type your message...">
+                                <button onclick="sendMessage()">📤</button>
+                            </div>
                         </div>
                     </div>
 
@@ -1644,7 +1575,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     </div>
 
                     <div class="form-container" style="border-radius: 16px; padding: 2.5rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);">
-                        <form method="POST" action="volunteer_dashboard.php?page=field_reports">
+                        <form method="POST" action="/volunteer_dashboard?page=field_reports">
+                    @csrf
                             <input type="hidden" name="action" value="submit_report">
                             
                             <div class="form-group">
@@ -1714,6 +1646,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 const form = document.createElement('form');
                 form.method = 'POST';
                 form.action = window.location.href;
+
+                const csrfInput = document.createElement('input');
+                csrfInput.type = 'hidden';
+                csrfInput.name = '_token';
+                csrfInput.value = '{{ csrf_token() }}';
+                form.appendChild(csrfInput);
+
 
                 const actionInput = document.createElement('input');
                 actionInput.type = 'hidden';
@@ -1865,7 +1804,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 <p style="color: #64748b; font-size: 0.9rem;">Assign a new task to yourself</p>
             </div>
             <div class="modal-body">
-                <form method="POST" action="volunteer_dashboard.php?page=tasks">
+                <form method="POST" action="/volunteer_dashboard?page=tasks">
+                    @csrf
                     <input type="hidden" name="action" value="create_task">
                     
                     <div class="form-group">
@@ -1948,7 +1888,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         // Real-time-ish check for new tasks/notifications
         let lastNotificationCount = <?php echo $unread_count; ?>;
         setInterval(() => {
-            fetch('volunteer_dashboard.php?api=check_notifications')
+            fetch('/volunteer_dashboard?api=check_notifications')
                 .then(res => res.json())
                 .then(data => {
                     if (data.count > lastNotificationCount) {

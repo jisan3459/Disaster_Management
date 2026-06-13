@@ -5,7 +5,7 @@ include base_path('../config.php');
 
 // Ensure the user is logged in as an affected person
 if (!isset($_SESSION['affected_id']) || !isset($_SESSION['affected_key'])) {
-    php_redirect(url('affected_login'));
+    php_redirect('/affected_login');
 }
 
 $affected_id = $_SESSION['affected_id'];
@@ -19,20 +19,14 @@ $person = $stmt->get_result()->fetch_assoc();
 if (!$person) {
     // If not found in DB for some reason, log out
     session_destroy();
-    php_redirect(url('affected_login'));
+    php_redirect('/affected_login');
 }
 
 $status = $person['registration_status']; // 'pending', 'assigned', 'resolved'
 
 $page = isset($_GET['page']) ? $_GET['page'] : 'dashboard';
 $allowed_pages_pending = ['dashboard', 'request_help', 'relief_status'];
-$allowed_pages_registered = ['dashboard', 'request_help', 'relief_status', 'camp_info'];
-
-// If person has chat_power, allow messages page
-if (!empty($person['chat_power'])) {
-    $allowed_pages_pending[] = 'messages';
-    $allowed_pages_registered[] = 'messages';
-}
+$allowed_pages_registered = ['dashboard', 'request_help', 'relief_status', 'camp_info', 'messages'];
 
 $allowed_pages = ($status === 'pending') ? $allowed_pages_pending : $allowed_pages_registered;
 
@@ -46,12 +40,11 @@ $error = '';
 // Handle POST for messages
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $page === 'messages') {
     $msg = sanitize($_POST['message'] ?? '');
-    $chat_target = $_POST['chat_target'] ?? 'admin'; // 'admin' or 'manager'
     if ($msg) {
         $insert = $conn->prepare("INSERT INTO affected_messages (affected_id, message_text, is_from_admin) VALUES (?, ?, 0)");
         $insert->bind_param("is", $affected_id, $msg);
         if ($insert->execute()) {
-            $success = "Message sent.";
+            $success = "Message sent to support.";
         } else {
             $error = "Failed to send message.";
         }
@@ -932,7 +925,6 @@ if (isset($_GET['ajax'])) {
                             Camp Information
                         </a>
                     </li>
-                    <?php if (!empty($person['chat_power'])): ?>
                     <li>
                         <a href="?page=messages" class="menu-link <?= $page === 'messages' ? 'active' : '' ?>">
                             <svg class="menu-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -943,7 +935,6 @@ if (isset($_GET['ajax'])) {
                             Messages
                         </a>
                     </li>
-                    <?php endif; ?>
                 <?php endif; ?>
                 <li>
                     <a href="#" class="menu-link">
@@ -961,7 +952,7 @@ if (isset($_GET['ajax'])) {
 
             <div class="sidebar-footer">
 
-                <a href="{{ url('logout') }}" class="logout-card" style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; padding: 12px; border-radius: 12px; text-decoration: none; color: #1e293b; margin: 10px;">
+                <a href="/logout" class="logout-card" style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; padding: 12px; border-radius: 12px; text-decoration: none; color: #1e293b; margin: 10px;">
                     <div style="display: flex; align-items: center; gap: 12px;">
                         <div style="width: 36px; height: 36px; background: #4f46e5; color: white; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 600; text-transform: uppercase;"><?= substr($person['full_name'], 0, 1) ?></div>
                         <span style="font-weight: 600; font-size: 15px;"><?= htmlspecialchars($person['full_name']) ?></span>
@@ -1131,7 +1122,7 @@ if (isset($_GET['ajax'])) {
                                 </div>
                                 <script>
                                     setInterval(function () {
-                                        fetch('{{ url('affected_dashboard') }}?page=dashboard&ajax=1')
+                                        fetch('/affected_dashboard?page=dashboard&ajax=1')
                                             .then(r => r.text())
                                             .then(html => {
                                                 document.getElementById('aid-received-content').innerHTML = html;
@@ -1385,7 +1376,7 @@ if (isset($_GET['ajax'])) {
 
                     <script>
                         setInterval(function () {
-                            fetch('{{ url('affected_dashboard') }}?page=relief_status&ajax=1')
+                            fetch('/affected_dashboard?page=relief_status&ajax=1')
                                 .then(r => r.text())
                                 .then(html => {
                                     document.getElementById('relief-status-content').innerHTML = html;
@@ -1439,50 +1430,40 @@ if (isset($_GET['ajax'])) {
                     </div>
 
                 <?php elseif ($page === 'messages' && in_array('messages', $allowed_pages)): ?>
-                    <!-- Camp Manager Chat -->
-                    <div class="chat-container" style="border-top: 3px solid #8b5cf6;">
-                        <div class="chat-header" style="background: linear-gradient(135deg, #ede9fe 0%, #f5f3ff 100%);">
-                            <h3 style="color:#5b21b6; display:flex; align-items:center; gap:8px;">
-                                🤝 Chat with Camp Manager
-                                <span style="background:#8b5cf6; color:white; padding:2px 8px; border-radius:999px; font-size:0.7rem; font-weight:600;">Chat Enabled by Admin</span>
-                            </h3>
+
+                    <div class="chat-container">
+                        <div class="chat-header">
+                            <h3>Chat with Camp Support</h3>
                         </div>
                         <div class="chat-messages" id="chatMessages">
-                            <div class="msg msg-admin" style="background: #fdf4ff; border: 1px solid #e9d5ff;">
-                                You have been granted direct chat access to your camp manager. Use this channel for urgent camp-related inquiries.
+                            <div class="msg msg-admin">
+                                Hello! You have been successfully registered to our relief system. Please let us know if you
+                                have any urgent medical needs or questions.
                             </div>
 
                             <?php
-                            $msg_stmt2 = $conn->prepare("SELECT * FROM affected_messages WHERE affected_id = ? ORDER BY created_at ASC");
-                            $msg_stmt2->bind_param("i", $affected_id);
-                            $msg_stmt2->execute();
-                            $messages2 = $msg_stmt2->get_result();
-                            while ($m2 = $messages2->fetch_assoc()):
-                                $is_from_support = ($m2['is_from_admin'] == 1);
-                            ?>
-                                <div class="msg <?= $is_from_support ? 'msg-admin' : 'msg-self' ?>" 
-                                     style="<?= $is_from_support ? 'background:#fdf4ff; border:1px solid #e9d5ff;' : 'background:#ede9fe; color:#4c1d95;' ?>">
-                                    <?php if ($is_from_support): ?>
-                                        <div style="font-size:0.7rem; font-weight:700; color:#6d28d9; margin-bottom:3px;">
-                                            <?= htmlspecialchars($m2['sender_label'] ?? 'Camp Manager') ?>
-                                        </div>
-                                    <?php endif; ?>
-                                    <?= nl2br(htmlspecialchars($m2['message_text'])) ?>
+                            $msg_stmt = $conn->prepare("SELECT * FROM affected_messages WHERE affected_id = ? ORDER BY created_at ASC");
+                            $msg_stmt->bind_param("i", $affected_id);
+                            $msg_stmt->execute();
+                            $messages = $msg_stmt->get_result();
+                            while ($m = $messages->fetch_assoc()):
+                                ?>
+                                <div class="msg <?= $m['is_from_admin'] ? 'msg-admin' : 'msg-self' ?>">
+                                    <?= nl2br(htmlspecialchars($m['message_text'])) ?>
                                 </div>
                             <?php endwhile; ?>
                         </div>
 
                         <form method="POST" class="chat-input-area">
                     @csrf
-                            <input type="hidden" name="chat_target" value="manager">
-                            <input type="text" name="message" placeholder="Type your message to the camp manager..." required autocomplete="off">
-                            <button type="submit" style="background:#8b5cf6;">Send</button>
+                            <input type="text" name="message" placeholder="Type your message..." required
+                                autocomplete="off">
+                            <button type="submit">Send Message</button>
                         </form>
                     </div>
-
                     <script>
                         const chatMsgs = document.getElementById('chatMessages');
-                        if (chatMsgs) chatMsgs.scrollTop = chatMsgs.scrollHeight;
+                        chatMsgs.scrollTop = chatMsgs.scrollHeight;
                     </script>
 
                 <?php endif; ?>

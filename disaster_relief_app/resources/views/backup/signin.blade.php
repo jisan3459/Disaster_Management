@@ -17,7 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['user_id'] = $is_admin ? 1 : 2; // Demo IDs
             $_SESSION['role'] = $is_admin ? 'admin' : 'camp_manager';
             $_SESSION['full_name'] = $is_admin ? 'System Admin' : 'Camp Manager';
-            php_redirect($is_admin ? 'admin_dashboard.php' : 'camp_manager_dashboard.php');
+            php_redirect($is_admin ? '/admin_dashboard' : '/camp_manager_dashboard');
         }
 
         // Check user in database
@@ -32,25 +32,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error = 'Your account is pending approval or inactive.';
                 } else {
                     // Login successful
-                $_SESSION['user_id'] = $user['id'];
-                $_SESSION['role'] = $user['role'];
-                $_SESSION['full_name'] = $user['full_name'];
-                
-                // Update last login
-                $conn->query("UPDATE users SET last_login = NOW() WHERE id = " . $user['id']);
-                
-                // Redirect based on role
-                if ($user['role'] === 'admin') {
-                    php_redirect('admin_dashboard.php');
-                } elseif ($user['role'] === 'camp_manager') {
-                    php_redirect('camp_manager_dashboard.php');
-                } elseif ($user['role'] === 'volunteer') {
-                    php_redirect('volunteer_dashboard.php');
-                } elseif ($user['role'] === 'donor') {
-                    php_redirect('donor_dashboard.php');
-                } else {
-                    php_redirect('index.php');
-                }
+                    $_SESSION['user_id'] = $user['id'];
+                    $_SESSION['role'] = $user['role'];
+                    $_SESSION['full_name'] = $user['full_name'];
+                    
+                    // Update last login
+                    $conn->query("UPDATE users SET last_login = NOW() WHERE id = " . $user['id']);
+                    
+                    // Redirect based on role
+                    if ($user['role'] === 'admin') {
+                        php_redirect('/admin_dashboard');
+                    } elseif ($user['role'] === 'camp_manager') {
+                        php_redirect('/camp_manager_dashboard');
+                    } elseif ($user['role'] === 'volunteer') {
+                        php_redirect('/volunteer_dashboard');
+                    } elseif ($user['role'] === 'donor') {
+                        php_redirect('/donor_dashboard');
+                    } else {
+                        php_redirect('/index');
+                    }
                 }
             } else {
                 $error = 'Incorrect password';
@@ -288,28 +288,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             text-decoration: underline;
         }
 
-        .btn-back-home {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 7px 14px;
-            border: 1.5px solid #d0d5e8;
-            border-radius: 8px;
-            color: #667eea;
-            font-size: 0.82rem;
-            font-weight: 600;
-            text-decoration: none;
-            background: #f4f6ff;
-            transition: background 0.2s, border-color 0.2s, color 0.2s;
-            white-space: nowrap;
-        }
-
-        .btn-back-home:hover {
-            background: #667eea;
-            color: white;
-            border-color: #667eea;
-        }
-
         .error-message {
             background-color: #f8d7da;
             color: #721c24;
@@ -405,14 +383,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="form-section">
             <div class="form-container">
                 <!-- Header -->
-                <div class="form-header" style="justify-content: space-between;">
-                    <div style="display:flex; align-items:center; gap:0.8rem;">
-                        <div class="logo-icon">🛡️</div>
-                        <h2>DisasterRelief</h2>
-                    </div>
-                    <a href="{{ url('/') }}" class="btn-back-home">
-                        ← Home
-                    </a>
+                <div class="form-header">
+                    <div class="logo-icon">🛡️</div>
+                    <h2>DisasterRelief</h2>
                 </div>
 
                 <!-- Form Title -->
@@ -436,7 +409,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
 
                 <!-- Sign In Form -->
-                <form method="POST">
+                <form method="POST" action="/signin">
                     @csrf
                     <!-- Email -->
                     <div class="form-group">
@@ -463,13 +436,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <button type="submit" class="btn-signin">Sign In</button>
 
                     <!-- Affected Login Button -->
-                    <a href="{{ url('affected_login') }}" style="text-decoration: none;">
+                    <a href="/affected_login" style="text-decoration: none;">
                         <button type="button" class="btn-signin" style="background-color: #f5f5f5; color: #1a1a1a; border: 1px solid #ddd; margin-top: 1rem;">Affected Person Login</button>
                     </a>
 
                     <!-- Sign Up Link -->
                     <div class="signup-link">
-                        Don't have an account? <a href="{{ url('signup') }}">Sign up here</a>
+                        Don't have an account? <a href="/signup">Sign up here</a>
                     </div>
                 </form>
             </div>

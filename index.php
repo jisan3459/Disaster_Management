@@ -3,6 +3,7 @@
 ?>
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -533,6 +534,7 @@
         }
     </style>
 </head>
+
 <body>
     <!-- Header -->
     <header>
@@ -546,9 +548,10 @@
     <!-- Hero Section -->
     <section class="hero">
         <h1>Coordinating Relief.<br>Saving Lives Together.</h1>
-        <p>Connect volunteers, manage camps, track donations, and provide aid to disaster-affected communities efficiently.</p>
+        <p>Connect volunteers, manage camps, track donations, and provide aid to disaster-affected communities
+            efficiently.</p>
         <div class="hero-buttons">
-            <a href="signup.php" style="text-decoration: none;"><button class="btn-primary">Request Help →</button></a>
+            <button class="btn-primary" onclick="openHelpModal()">Request Help →</button>
             <a href="signup.php" style="text-decoration: none;"><button class="btn-secondary">❤️ Donate Now</button></a>
         </div>
 
@@ -561,7 +564,7 @@
             </div>
             <div class="stat-card">
                 <div class="stat-icon">❤️</div>
-                <div class="stat-number">₹5 Cr+</div>
+                <div class="stat-number">৳5 Cr+</div>
                 <div class="stat-label">Donations Received</div>
             </div>
             <div class="stat-card">
@@ -576,7 +579,7 @@
     <section class="campaigns">
         <h2>Active Relief Campaigns</h2>
         <p class="campaigns-subtitle">Support ongoing disaster relief efforts</p>
-        
+
         <div class="campaigns-grid">
             <!-- Campaign 1 -->
             <div class="campaign-card">
@@ -584,11 +587,11 @@
                     <div class="campaign-title">Flood Relief - Dhaka Division</div>
                     <span class="urgent-badge">Urgent</span>
                 </div>
-                
+
                 <div class="campaign-progress">
                     <div class="progress-label">
-                        <span>₹45L</span>
-                        <span>of ₹1Cr</span>
+                        <span>৳45L</span>
+                        <span>of ৳1Cr</span>
                     </div>
                     <div class="progress-bar">
                         <div class="progress-fill" style="width: 45%;"></div>
@@ -613,11 +616,11 @@
                     <div class="campaign-title">Cyclone Recovery - Coastal Areas</div>
                     <span class="urgent-badge">Urgent</span>
                 </div>
-                
+
                 <div class="campaign-progress">
                     <div class="progress-label">
-                        <span>₹78L</span>
-                        <span>of ₹1.5Cr</span>
+                        <span>৳78L</span>
+                        <span>of ৳1.5Cr</span>
                     </div>
                     <div class="progress-bar">
                         <div class="progress-fill" style="width: 52%;"></div>
@@ -641,11 +644,11 @@
                 <div class="campaign-header">
                     <div class="campaign-title">Flood Affected Areas</div>
                 </div>
-                
+
                 <div class="campaign-progress">
                     <div class="progress-label">
-                        <span>₹132L</span>
-                        <span>of ₹175L</span>
+                        <span>৳132L</span>
+                        <span>of ৳175L</span>
                     </div>
                     <div class="progress-bar">
                         <div class="progress-fill" style="width: 75%;"></div>
@@ -736,5 +739,154 @@
             © 2026 DisasterRelief. All rights reserved.
         </div>
     </footer>
+
+    <!-- Help Request Modal -->
+    <div id="helpModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeHelpModal()">&times;</span>
+            <h2>Request Emergency Help</h2>
+            <p>Please provide your details below. You will receive an access key to track your relief status.</p>
+            <form id="helpForm" onsubmit="submitHelpRequest(event)">
+                <div class="form-group">
+                    <label>Full Name</label>
+                    <input type="text" id="helpName" required placeholder="Enter your full name">
+                </div>
+                <div class="form-group">
+                    <label>Location (Division)</label>
+                    <select id="helpLocation" required>
+                        <option value="">Select Division</option>
+                        <option value="Dhaka">Dhaka</option>
+                        <option value="Chattogram">Chattogram</option>
+                        <option value="Khulna">Khulna</option>
+                        <option value="Rajshahi">Rajshahi</option>
+                        <option value="Barishal">Barishal</option>
+                        <option value="Sylhet">Sylhet</option>
+                        <option value="Rangpur">Rangpur</option>
+                        <option value="Mymensingh">Mymensingh</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Number of Family Members</label>
+                    <input type="number" id="helpMembers" required min="1" value="1">
+                </div>
+                <button type="submit" class="btn-primary" style="width: 100%; justify-content: center; margin-top: 1rem;">Submit Request</button>
+            </form>
+            <div id="helpResult" style="display: none; text-align: center; margin-top: 1rem;">
+                <h3 style="color: #4caf50;">Request Submitted!</h3>
+                <p>Your access key is: <strong id="accessKeyDisplay" style="font-size: 1.5rem; letter-spacing: 2px; color: #1a73e8; display: block; margin: 10px 0;"></strong></p>
+                <p style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">Please save this key. You will need it to login and check your status.</p>
+                <button class="btn-primary" onclick="goToDashboard()" style="width: 100%; justify-content: center;">Go to My Dashboard</button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-content {
+            background-color: #fff;
+            padding: 2rem;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 500px;
+            position: relative;
+        }
+        .close {
+            position: absolute;
+            right: 1.5rem;
+            top: 1rem;
+            font-size: 2rem;
+            cursor: pointer;
+            color: #666;
+        }
+        .modal-content h2 {
+            margin-bottom: 0.5rem;
+            color: #1a1a1a;
+        }
+        .modal-content p {
+            color: #666;
+            font-size: 0.95rem;
+            margin-bottom: 1.5rem;
+        }
+        .modal-content .form-group {
+            margin-bottom: 1rem;
+            text-align: left;
+        }
+        .modal-content label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: #333;
+        }
+        .modal-content input, .modal-content select {
+            width: 100%;
+            padding: 0.8rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: inherit;
+        }
+    </style>
+
+    <script>
+        function openHelpModal() {
+            document.getElementById('helpModal').style.display = 'flex';
+        }
+        function closeHelpModal() {
+            document.getElementById('helpModal').style.display = 'none';
+        }
+        
+        let redirectUrl = '';
+
+        function submitHelpRequest(e) {
+            e.preventDefault();
+            const name = document.getElementById('helpName').value;
+            const location = document.getElementById('helpLocation').value;
+            const members = document.getElementById('helpMembers').value;
+
+            const formData = new FormData();
+            formData.append('name', name);
+            formData.append('location', location);
+            formData.append('family_members', members);
+
+            fetch('affected_register.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if(data.success) {
+                    document.getElementById('helpForm').style.display = 'none';
+                    document.getElementById('helpResult').style.display = 'block';
+                    document.getElementById('accessKeyDisplay').innerText = data.key;
+                    redirectUrl = data.redirect;
+                } else {
+                    alert(data.message || 'Error submitting request');
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                alert('Error submitting request');
+            });
+        }
+
+        function goToDashboard() {
+            if (redirectUrl) {
+                window.location.href = redirectUrl;
+            } else {
+                window.location.href = 'affected_dashboard.php';
+            }
+        }
+    </script>
 </body>
+
 </html>

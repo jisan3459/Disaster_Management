@@ -1,7 +1,7 @@
 <?php
-include 'config.php';
+session_start();
 session_unset();
 session_destroy();
-redirect('signin.php');
+header("Location: /signin");
 exit();
 ?>

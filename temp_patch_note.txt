@@ -1,0 +1,1 @@
+Applying patch to admin_dashboard.php: add verify/fail/revoke donation POST handlers and update donations table UI actions.

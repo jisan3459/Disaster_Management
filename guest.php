@@ -341,7 +341,7 @@ $volunteers = 15;
                 <a href="index.php">Home</a>
                 <a href="admin_dashboard.php">Dashboard</a>
                 <a href="campaigns.php">Campaigns</a>
-                <a href="signin.php">Donate</a>
+                <a href="donate.php">Donate</a>
                 <a href="signin.php">Emergency</a>
             </div>
 

@@ -538,10 +538,10 @@
 <body>
     <!-- Header -->
     <header>
-        <a href="{{ url('/') }}" class="logo">DisasterRelief</a>
+        <a href="/" class="logo">DisasterRelief</a>
         <nav class="header-nav">
-            <a href="{{ url('signin') }}">Sign In</a>
-            <a href="{{ url('signup') }}" style="text-decoration: none;"><button class="btn-get-started">Get Started</button></a>
+            <a href="/signin">Sign In</a>
+            <a href="/signup" style="text-decoration: none;"><button class="btn-get-started">Get Started</button></a>
         </nav>
     </header>
 
@@ -552,7 +552,7 @@
             efficiently.</p>
         <div class="hero-buttons">
             <button class="btn-primary" onclick="openHelpModal()">Request Help →</button>
-            <a href="{{ url('signup') }}" style="text-decoration: none;"><button class="btn-secondary">❤️ Donate Now</button></a>
+            <a href="/signup" style="text-decoration: none;"><button class="btn-secondary">❤️ Donate Now</button></a>
         </div>
 
         <!-- Stats -->
@@ -854,11 +854,12 @@
             const members = document.getElementById('helpMembers').value;
 
             const formData = new FormData();
+            formData.append('_token', '{{ csrf_token() }}');
             formData.append('name', name);
             formData.append('location', location);
             formData.append('family_members', members);
 
-            fetch('{{ url('affected_register') }}', {
+            fetch('/affected_register', {
                 method: 'POST',
                 body: formData
             })
@@ -883,7 +884,7 @@
             if (redirectUrl) {
                 window.location.href = redirectUrl;
             } else {
-                window.location.href = 'affected_dashboard.php';
+                window.location.href = '/affected_dashboard';
             }
         }
     </script>

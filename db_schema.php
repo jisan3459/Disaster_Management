@@ -100,21 +100,14 @@ $tables = array(
         id INT PRIMARY KEY AUTO_INCREMENT,
         donor_id INT,
         campaign_id INT,
-        camp_id INT NULL DEFAULT NULL,
         amount DECIMAL(10, 2),
         donation_type ENUM('money', 'supplies', 'other') DEFAULT 'money',
         status ENUM('pending', 'completed', 'failed') DEFAULT 'pending',
         payment_method VARCHAR(100),
         transaction_id VARCHAR(255),
-        pickup_address TEXT NULL DEFAULT NULL,
-        pickup_phone VARCHAR(20) NULL DEFAULT NULL,
-        supply_delivery_method VARCHAR(50) NULL DEFAULT NULL,
-        message TEXT NULL DEFAULT NULL,
-        item_name VARCHAR(255) NULL DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (donor_id) REFERENCES users(id),
-        FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
-        FOREIGN KEY (camp_id) REFERENCES camps(id) ON DELETE SET NULL
+        FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
     )",
 
     // Messages/Chat Table
