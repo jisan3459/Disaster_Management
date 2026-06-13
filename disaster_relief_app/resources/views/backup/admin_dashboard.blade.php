@@ -2,20 +2,20 @@
 include base_path('../config.php');
 
 if (!isLoggedIn()) {
-    php_redirect(url('signin'));
+    php_redirect('/signin');
 }
 
 $user_role = $_SESSION['role'] ?? '';
 
 if ($user_role !== 'admin') {
     if ($user_role === 'camp_manager') {
-        php_redirect(url('camp_manager_dashboard'));
+        php_redirect('/camp_manager_dashboard');
     } elseif ($user_role === 'volunteer') {
-        php_redirect(url('volunteer_dashboard'));
+        php_redirect('/volunteer_dashboard');
     } elseif ($user_role === 'donor') {
-        php_redirect(url('donor_dashboard'));
+        php_redirect('/donor_dashboard');
     } else {
-        php_redirect(url('/'));
+        php_redirect('/index');
     }
 }
 
@@ -32,6 +32,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = $_POST['action'];
         
 
+        if ($action === 'approve_donor' || $action === 'reject_donor') {
+            $donor_id = intval($_POST['donor_id']);
+            $new_status = ($action === 'approve_donor') ? 'active' : 'inactive';
+            $update = $conn->query("UPDATE users SET status = '$new_status' WHERE id = $donor_id AND role = 'donor'");
+            if ($update) {
+                $success_msg = "Donor successfully " . ($action === 'approve_donor' ? "approved" : "deactivated") . ".";
+            } else {
+                $error_msg = "Failed to update donor status.";
+            }
+        }
+
+        if ($action === 'send_chat_message') {
+            $receiver_id = intval($_POST['receiver_id']);
+            $msg = sanitize($_POST['message'] ?? '');
+            if ($msg && $receiver_id) {
+                $conn->query("INSERT INTO messages (sender_id, receiver_id, message_text) VALUES ($user_id, $receiver_id, '$msg')");
+                php_redirect("/admin_dashboard?page=chat&user_id=$receiver_id");
+            }
+        }
+
         if ($action === 'approve_volunteer' || $action === 'reject_volunteer') {
             $vol_id = intval($_POST['volunteer_id']);
             $new_status = ($action === 'approve_volunteer') ? 'active' : 'inactive';
@@ -43,49 +63,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         
-        if ($action === 'approve_donor' || $action === 'reject_donor') {
-            $donor_id = intval($_POST['donor_id']);
-            $new_status = ($action === 'approve_donor') ? 'active' : 'inactive';
-            $update = $conn->query("UPDATE users SET status = '$new_status' WHERE id = $donor_id AND role = 'donor'");
-            if ($update) {
-                $success_msg = "Donor successfully " . ($action === 'approve_donor' ? "approved" : "deactivated") . ".";
-            } else {
-                $error_msg = "Failed to update donor status.";
-            }
-        }
-        
-        if ($action === 'send_announcement') {
-            $title = $conn->real_escape_string($_POST['title']);
-            $message = $conn->real_escape_string($_POST['message']);
-            $target = $_POST['target'] ?? 'all';
-            
-            $condition = "";
-            if ($target === 'volunteers') $condition = "WHERE role = 'volunteer'";
-            else if ($target === 'managers') $condition = "WHERE role = 'camp_manager'";
-            else if ($target === 'donors') $condition = "WHERE role = 'donor'";
-            
-            $users_res = $conn->query("SELECT id FROM users $condition");
-            if ($users_res && $users_res->num_rows > 0) {
-                while($u = $users_res->fetch_assoc()) {
-                    $uid = $u['id'];
-                    $conn->query("INSERT INTO notifications (user_id, notification_type, title, message) VALUES ($uid, 'announcement', '$title', '$message')");
-                }
-                $success_msg = "Announcement broadcasted successfully.";
-            } else {
-                $error_msg = "No users found to send announcement to.";
-            }
-        }
-        
-        if ($action === 'resolve_alert') {
-            $alert_id = intval($_POST['alert_id']);
-            $update = $conn->query("UPDATE emergency_reports SET status = 'resolved', resolved_at = NOW() WHERE id = $alert_id");
-            if ($update) {
-                $success_msg = "Emergency alert marked as resolved.";
-            } else {
-                $error_msg = "Failed to resolve alert.";
-            }
-        }
-        
 
         if ($action === 'delete_camp') {
             $camp_id = intval($_POST['camp_id']);
@@ -94,18 +71,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $success_msg = "Camp successfully removed.";
             } else {
                 $error_msg = "Failed to remove camp.";
-            }
-        }
-
-        if ($action === 'edit_inventory') {
-            $inv_id = intval($_POST['inventory_id']);
-            $qty = floatval($_POST['quantity']);
-            $status = sanitize($_POST['status']);
-            $update = $conn->query("UPDATE inventory SET quantity = $qty, status = '$status', updated_at = NOW() WHERE id = $inv_id");
-            if ($update) {
-                $success_msg = "Inventory updated successfully.";
-            } else {
-                $error_msg = "Failed to update inventory.";
             }
         }
 
@@ -255,58 +220,73 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        if ($action === 'send_chat_message') {
-            $receiver_id = intval($_POST['receiver_id']);
-            $msg = sanitize($_POST['message'] ?? '');
-            if ($msg && $receiver_id) {
-                $conn->query("INSERT INTO messages (sender_id, receiver_id, message_text) VALUES ($user_id, $receiver_id, '$msg')");
-                php_redirect(url('admin_dashboard') . "?page=chat&user_id=$receiver_id");
-                exit();
-            }
-        }
-
-        // Grant/revoke chat power to affected persons
-        if ($action === 'grant_chat_power') {
-            $ap_id = intval($_POST['affected_id']);
-            $update = $conn->query("UPDATE affected_persons SET chat_power = 1 WHERE id = $ap_id");
-            if ($update) {
-                $success_msg = "Chat power granted to affected person.";
-            } else {
-                $error_msg = "Failed to grant chat power.";
-            }
-        }
-
-        if ($action === 'revoke_chat_power') {
-            $ap_id = intval($_POST['affected_id']);
-            $update = $conn->query("UPDATE affected_persons SET chat_power = 0 WHERE id = $ap_id");
-            if ($update) {
-                $success_msg = "Chat power revoked from affected person.";
-            } else {
-                $error_msg = "Failed to revoke chat power.";
-            }
-        }
-
+        // Admin donation verification actions
         if ($action === 'verify_donation') {
             $donation_id = intval($_POST['donation_id']);
-            
-            // Get donation details first
-            $don_query = $conn->query("SELECT amount, campaign_id FROM donations WHERE id = $donation_id AND status = 'pending'");
-            if ($don_query && $don_query->num_rows > 0) {
-                $don_data = $don_query->fetch_assoc();
-                
-                $update = $conn->query("UPDATE donations SET status = 'completed' WHERE id = $donation_id");
-                if ($update) {
-                    if ($don_data['campaign_id']) {
-                        $campaign_id = $don_data['campaign_id'];
-                        $amount = $don_data['amount'];
-                        $conn->query("UPDATE campaigns SET raised_amount = raised_amount + $amount WHERE id = $campaign_id");
+            $dres = $conn->query("SELECT status, campaign_id, amount FROM donations WHERE id = $donation_id");
+            if ($dres && $dres->num_rows > 0) {
+                $d = $dres->fetch_assoc();
+                if ($d['status'] !== 'completed') {
+                    $update = $conn->query("UPDATE donations SET status = 'completed' WHERE id = $donation_id");
+                    if ($update) {
+                        if (!empty($d['campaign_id'])) {
+                            $amt = floatval($d['amount']);
+                            $cid = intval($d['campaign_id']);
+                            $conn->query("UPDATE campaigns SET raised_amount = raised_amount + $amt WHERE id = $cid");
+                        }
+                        $success_msg = "Donation verified and marked completed.";
+                    } else {
+                        $error_msg = "Failed to verify donation.";
                     }
-                    $success_msg = "Donation verified successfully.";
                 } else {
-                    $error_msg = "Failed to verify donation.";
+                    $error_msg = "Donation is already completed.";
                 }
             } else {
-                $error_msg = "Donation not found or already verified.";
+                $error_msg = "Donation not found.";
+            }
+        }
+
+        if ($action === 'fail_donation') {
+            $donation_id = intval($_POST['donation_id']);
+            $dres = $conn->query("SELECT status, campaign_id, amount FROM donations WHERE id = $donation_id");
+            if ($dres && $dres->num_rows > 0) {
+                $d = $dres->fetch_assoc();
+                $wasCompleted = ($d['status'] === 'completed');
+                $update = $conn->query("UPDATE donations SET status = 'failed' WHERE id = $donation_id");
+                if ($update) {
+                    if ($wasCompleted && !empty($d['campaign_id'])) {
+                        $amt = floatval($d['amount']);
+                        $cid = intval($d['campaign_id']);
+                        $conn->query("UPDATE campaigns SET raised_amount = GREATEST(0, raised_amount - $amt) WHERE id = $cid");
+                    }
+                    $success_msg = "Donation marked as failed.";
+                } else {
+                    $error_msg = "Failed to update donation status.";
+                }
+            } else {
+                $error_msg = "Donation not found.";
+            }
+        }
+
+        if ($action === 'revoke_donation') {
+            $donation_id = intval($_POST['donation_id']);
+            $dres = $conn->query("SELECT status, campaign_id, amount FROM donations WHERE id = $donation_id");
+            if ($dres && $dres->num_rows > 0) {
+                $d = $dres->fetch_assoc();
+                $wasCompleted = ($d['status'] === 'completed');
+                $update = $conn->query("UPDATE donations SET status = 'pending' WHERE id = $donation_id");
+                if ($update) {
+                    if ($wasCompleted && !empty($d['campaign_id'])) {
+                        $amt = floatval($d['amount']);
+                        $cid = intval($d['campaign_id']);
+                        $conn->query("UPDATE campaigns SET raised_amount = GREATEST(0, raised_amount - $amt) WHERE id = $cid");
+                    }
+                    $success_msg = "Donation status reverted to pending.";
+                } else {
+                    $error_msg = "Failed to revert donation status.";
+                }
+            } else {
+                $error_msg = "Donation not found.";
             }
         }
     }
@@ -320,12 +300,12 @@ $page = isset($_GET['page']) ? $_GET['page'] : 'dashboard';
 
 
 $stats_query = [
+    'unread_chat' => $conn->query("SELECT COUNT(*) FROM messages WHERE receiver_id = $user_id AND is_read = 0")->fetch_row()[0] ?? 0,
     'active_camps' => $conn->query("SELECT COUNT(*) FROM camps WHERE status = 'active'")->fetch_row()[0],
     'total_volunteers' => $conn->query("SELECT COUNT(*) FROM users WHERE role = 'volunteer'")->fetch_row()[0],
     'affected_people' => $conn->query("SELECT SUM(current_occupancy) FROM camps")->fetch_row()[0] ?? 0,
     'total_donations' => $conn->query("SELECT SUM(amount) FROM donations WHERE status = 'completed'")->fetch_row()[0] ?? 0,
     'alerts_count' => $conn->query("SELECT COUNT(*) FROM emergency_reports WHERE status IN ('pending', 'in_progress')")->fetch_row()[0] ?? 0,
-    'unread_chat' => $conn->query("SELECT COUNT(*) FROM messages WHERE receiver_id = $user_id AND is_read = 0")->fetch_row()[0] ?? 0,
 ];
 
 
@@ -361,8 +341,6 @@ if ($donors_res) {
         $donors[] = $row;
     }
 }
-
-
 
 $managers_res = $conn->query("SELECT id, full_name FROM users WHERE role = 'camp_manager'");
 $managers = [];
@@ -431,54 +409,6 @@ if ($page === 'inventory') {
         }
     }
 }
-
-$alerts_list = [];
-if ($page === 'alerts') {
-    $alerts_res = $conn->query("
-        SELECT e.*, u.full_name as reporter_name, c.camp_name 
-        FROM emergency_reports e 
-        LEFT JOIN users u ON e.reported_by = u.id 
-        LEFT JOIN camps c ON e.camp_id = c.id 
-        ORDER BY e.created_at DESC
-    ");
-    if ($alerts_res) {
-        while($row = $alerts_res->fetch_assoc()) {
-            $alerts_list[] = $row;
-        }
-    }
-}
-
-$reports_list = [];
-$reports_summary = [];
-if ($page === 'reports') {
-    $table_check = $conn->query("SHOW TABLES LIKE 'distributions'");
-    if ($table_check && $table_check->num_rows > 0) {
-        $reports_res = $conn->query("
-            SELECT d.*, c.camp_name, u.full_name as volunteer_name 
-            FROM distributions d 
-            LEFT JOIN camps c ON d.camp_id = c.id 
-            LEFT JOIN users u ON d.distributed_by = u.id 
-            ORDER BY d.distributed_at DESC
-        ");
-        if ($reports_res) {
-            while($row = $reports_res->fetch_assoc()) {
-                $reports_list[] = $row;
-            }
-        }
-        
-        $summary_res = $conn->query("
-            SELECT c.camp_name, COUNT(d.id) as total_distributions, SUM(d.quantity) as total_items 
-            FROM distributions d 
-            LEFT JOIN camps c ON d.camp_id = c.id 
-            GROUP BY d.camp_id
-        ");
-        if ($summary_res) {
-            while($row = $summary_res->fetch_assoc()) {
-                $reports_summary[] = $row;
-            }
-        }
-    }
-}
 ?>
 
 
@@ -488,7 +418,6 @@ if ($page === 'reports') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard - DisasterRelief</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; background: #f3f4f6; color: #111827; }
@@ -615,17 +544,18 @@ if ($page === 'reports') {
                 <div class="brand">Disaster Relief</div>
             </div>
             <ul class="menu">
-                <li class="menu-item"><a href="{{ url('admin_dashboard') }}?page=dashboard" class="menu-link <?php echo $page === 'dashboard' ? 'active' : ''; ?>"><span class="menu-icon">📊</span>Dashboard</a></li>
-                <li class="menu-item"><a href="{{ url('admin_dashboard') }}?page=managers" class="menu-link <?php echo $page === 'managers' ? 'active' : ''; ?>"><span class="menu-icon">👤</span>Camp Managers</a></li>
-                <li class="menu-item"><a href="{{ url('admin_dashboard') }}?page=camps" class="menu-link <?php echo $page === 'camps' ? 'active' : ''; ?>"><span class="menu-icon">⛺</span>Camps</a></li>
-                <li class="menu-item"><a href="{{ url('admin_dashboard') }}?page=volunteers" class="menu-link <?php echo $page === 'volunteers' ? 'active' : ''; ?>"><span class="menu-icon">🧑‍🤝‍🧑</span>Volunteers<span class="menu-badge"><?php echo $stats_query['total_volunteers']; ?></span></a></li>
-                <li class="menu-item"><a href="{{ url('admin_dashboard') }}?page=donors" class="menu-link <?php echo $page === 'donors' ? 'active' : ''; ?>"><span class="menu-icon">❤️</span>Donors</a></li>
-                <li class="menu-item"><a href="{{ url('admin_dashboard') }}?page=donations" class="menu-link <?php echo $page === 'donations' ? 'active' : ''; ?>"><span class="menu-icon">💵</span>Donations</a></li>
-                <li class="menu-item"><a href="{{ url('admin_dashboard') }}?page=tasks" class="menu-link <?php echo $page === 'tasks' ? 'active' : ''; ?>"><span class="menu-icon">📋</span>Task Assignment</a></li>
-                <li class="menu-item"><a href="{{ url('admin_dashboard') }}?page=inventory" class="menu-link <?php echo $page === 'inventory' ? 'active' : ''; ?>"><span class="menu-icon">📦</span>Inventory</a></li>
-                <li class="menu-item"><a href="{{ url('admin_dashboard') }}?page=alerts" class="menu-link <?php echo $page === 'alerts' ? 'active' : ''; ?>"><span class="menu-icon">⚠️</span>Alerts<span class="menu-badge"><?php echo $stats_query['alerts_count']; ?></span></a></li>
-                <li class="menu-item"><a href="{{ url('admin_dashboard') }}?page=chat" class="menu-link <?php echo $page === 'chat' ? 'active' : ''; ?>"><span class="menu-icon">💬</span>Support Chat<?php if($stats_query['unread_chat'] > 0): ?><span class="menu-badge" style="background: #ef4444;"><?php echo $stats_query['unread_chat']; ?></span><?php endif; ?></a></li>
-                <li class="menu-item"><a href="{{ url('admin_dashboard') }}?page=reports" class="menu-link <?php echo $page === 'reports' ? 'active' : ''; ?>"><span class="menu-icon">📈</span>Reports</a></li>
+                <li class="menu-item"><a href="/admin_dashboard?page=dashboard" class="menu-link <?php echo $page === 'dashboard' ? 'active' : ''; ?>"><span class="menu-icon">📊</span>Dashboard</a></li>
+                <li class="menu-item"><a href="/admin_dashboard?page=managers" class="menu-link <?php echo $page === 'managers' ? 'active' : ''; ?>"><span class="menu-icon">👤</span>Camp Managers</a></li>
+                <li class="menu-item"><a href="/admin_dashboard?page=camps" class="menu-link <?php echo $page === 'camps' ? 'active' : ''; ?>"><span class="menu-icon">⛺</span>Camps</a></li>
+                <li class="menu-item"><a href="/admin_dashboard?page=volunteers" class="menu-link <?php echo $page === 'volunteers' ? 'active' : ''; ?>"><span class="menu-icon">🧑‍🤝‍🧑</span>Volunteers<span class="menu-badge"><?php echo $stats_query['total_volunteers']; ?></span></a></li>
+                <li class="menu-item"><a href="/admin_dashboard?page=donors" class="menu-link <?php echo $page === 'donors' ? 'active' : ''; ?>"><span class="menu-icon">❤️</span>Donors</a></li>
+                <li class="menu-item"><a href="/admin_dashboard?page=donations" class="menu-link <?php echo $page === 'donations' ? 'active' : ''; ?>"><span class="menu-icon">💵</span>Donations</a></li>
+                <li class="menu-item"><a href="/admin_dashboard?page=tasks" class="menu-link <?php echo $page === 'tasks' ? 'active' : ''; ?>"><span class="menu-icon">📋</span>Task Assignment</a></li>
+                <li class="menu-item"><a href="/admin_dashboard?page=inventory" class="menu-link <?php echo $page === 'inventory' ? 'active' : ''; ?>"><span class="menu-icon">📦</span>Inventory</a></li>
+                <li class="menu-item"><a href="/admin_dashboard?page=alerts" class="menu-link <?php echo $page === 'alerts' ? 'active' : ''; ?>"><span class="menu-icon">⚠️</span>Alerts<span class="menu-badge"><?php echo $stats_query['alerts_count']; ?></span></a></li>
+                <li class="menu-item"><a href="/admin_dashboard?page=chat" class="menu-link <?php echo $page === 'chat' ? 'active' : ''; ?>"><span class="menu-icon">💬</span>Support Chat<?php if($stats_query['unread_chat'] > 0): ?><span class="menu-badge" style="background: #ef4444;"><?php echo $stats_query['unread_chat']; ?></span><?php endif; ?></a></li>
+                <li class="menu-item"><a href="/admin_dashboard?page=reports" class="menu-link <?php echo $page === 'reports' ? 'active' : ''; ?>"><span class="menu-icon">📈</span>Reports</a></li>
+                <li class="menu-item"><a href="/admin_dashboard?page=settings" class="menu-link <?php echo $page === 'settings' ? 'active' : ''; ?>"><span class="menu-icon">⚙️</span>Settings</a></li>
             </ul>
             <div class="sidebar-footer">Admin console for managing camps, volunteers, donations, and alerts.</div>
         </aside>
@@ -654,9 +584,10 @@ if ($page === 'reports') {
                                 <p style="font-weight: 700; font-size: 0.9rem;"><?php echo htmlspecialchars($user['full_name']); ?></p>
                                 <p style="font-size: 0.75rem; color: #6b7280;"><?php echo htmlspecialchars($user['email']); ?></p>
                             </div>
-                            <a href="{{ url('admin_dashboard') }}?page=profile" class="dropdown-item">👤 My Profile</a>
+                            <a href="/admin_dashboard?page=profile" class="dropdown-item">👤 My Profile</a>
+                            <a href="/admin_dashboard?page=settings" class="dropdown-item">⚙️ Settings</a>
                             <div style="border-top: 1px solid #f3f4f6;"></div>
-                            <a href="{{ url('logout') }}" class="dropdown-item logout">🚪 Log Out</a>
+                            <a href="/logout" class="dropdown-item logout">🚪 Log Out</a>
                         </div>
                     </div>
                 </div>
@@ -881,6 +812,7 @@ if ($page === 'reports') {
                             <div class="page-title">Volunteers Management</div>
                             <div class="page-subtitle">Approve registrations and manage volunteers</div>
                         </div>
+                        <button type="button" class="btn-primary" onclick="alert('Invite functionality coming soon');">Invite Volunteer</button>
                     </div>
                     <div class="panel" style="margin-bottom: 1.5rem;">
                         <div class="page-header" style="padding:0; margin-bottom:1rem; gap:0.75rem;">
@@ -920,48 +852,6 @@ if ($page === 'reports') {
                             </tbody>
                         </table>
                     </div>
-                <?php elseif ($page === 'donors'): ?>
-                    <div class="page-header">
-                        <div>
-                            <div class="page-title">Donor Accounts Management</div>
-                            <div class="page-subtitle">Approve registrations and manage donor accounts</div>
-                        </div>
-                    </div>
-                    <div class="panel" style="margin-bottom: 1.5rem;">
-                        <div class="page-header" style="padding:0; margin-bottom:1rem; gap:0.75rem;">
-                            <div style="display:flex; align-items:center; gap:0.75rem;"><span class="badge active">Donor List</span><span style="color:#6b7280;"><?php echo count($donors); ?></span></div>
-                        </div>
-                        <table class="table">
-                            <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Status</th><th>Actions</th></tr></thead>
-                            <tbody>
-                                <?php foreach ($donors as $donor): ?>
-                                    <tr>
-                                        <td><?php echo htmlspecialchars($donor['full_name']); ?></td>
-                                        <td><?php echo htmlspecialchars($donor['email']); ?></td>
-                                        <td><?php echo htmlspecialchars($donor['phone'] ?? 'N/A'); ?></td>
-                                        <td><span class="badge <?php echo $donor['status'] === 'active' ? 'active' : 'inactive'; ?>"><?php echo ucfirst($donor['status']); ?></span></td>
-                                        <td class="table-actions">
-                                            <?php if ($donor['status'] !== 'active'): ?>
-                                                <form method="POST" style="display:inline;">
-                    @csrf
-                                                    <input type="hidden" name="action" value="approve_donor">
-                                                    <input type="hidden" name="donor_id" value="<?php echo $donor['id']; ?>">
-                                                    <button class="btn btn-approve" type="submit">Approve</button>
-                                                </form>
-                                            <?php else: ?>
-                                                <form method="POST" style="display:inline;">
-                    @csrf
-                                                    <input type="hidden" name="action" value="reject_donor">
-                                                    <input type="hidden" name="donor_id" value="<?php echo $donor['id']; ?>">
-                                                    <button class="btn btn-reject" type="submit">Deactivate</button>
-                                                </form>
-                                            <?php endif; ?>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
                 <?php elseif ($page === 'donations'): ?>
                     <div class="page-header">
                         <div>
@@ -973,6 +863,8 @@ if ($page === 'reports') {
                             <button type="button" class="btn-primary" onclick="alert('Manual record entry coming soon')">+ Record Donation</button>
                         </div>
                     </div>
+                    <!-- DEV BANNER: Blade donations view loaded -->
+                    <div style="background:#fff1f2; color:#991b1b; border:1px solid #fecaca; padding:0.6rem 0.9rem; border-radius:10px; margin-bottom:1rem; display:inline-block;">DEV: Blade donations view active</div>
 
                     <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 2rem;">
                         <div class="stat-card" style="background: #f5f3ff;">
@@ -1048,14 +940,31 @@ if ($page === 'reports') {
                                             <td><code style="font-size:0.85rem; color:#6b7280;"><?php echo htmlspecialchars($donation['transaction_id'] ?: 'N/A'); ?></code></td>
                                             <td><?php echo date('M d, Y', strtotime($donation['created_at'])); ?></td>
                                             <td class="table-actions">
-                                                <button class="btn-secondary" style="padding:0.4rem 0.8rem;" onclick="alert('Viewing details for <?php echo $donation['transaction_id']; ?>')">View</button>
                                                 <?php if ($donation['status'] === 'pending'): ?>
-                                                    <form method="POST" style="display:inline;" onsubmit="return confirm('Are you sure you want to verify this donation?');">
-                    @csrf
+                                                    <form method="POST" style="display:inline; margin-right:6px;">
                                                         <input type="hidden" name="action" value="verify_donation">
                                                         <input type="hidden" name="donation_id" value="<?php echo $donation['id']; ?>">
-                                                        <button class="btn-approve" type="submit" style="padding:0.4rem 0.8rem; margin-left: 0.5rem;">Verify</button>
+                                                        <button class="btn-approve" type="submit" style="padding:0.4rem 0.8rem; border:none; border-radius:6px; cursor:pointer;" onclick="return confirm('Mark this donation as verified and completed?')">✓ Verify</button>
                                                     </form>
+                                                    <form method="POST" style="display:inline;">
+                                                        <input type="hidden" name="action" value="fail_donation">
+                                                        <input type="hidden" name="donation_id" value="<?php echo $donation['id']; ?>">
+                                                        <button class="btn-reject" type="submit" style="padding:0.4rem 0.8rem; border:none; border-radius:6px; cursor:pointer;" onclick="return confirm('Mark this donation as failed?')">✗ Mark Failed</button>
+                                                    </form>
+                                                <?php elseif ($donation['status'] === 'completed'): ?>
+                                                    <form method="POST" style="display:inline; margin-right:6px;">
+                                                        <input type="hidden" name="action" value="revoke_donation">
+                                                        <input type="hidden" name="donation_id" value="<?php echo $donation['id']; ?>">
+                                                        <button class="btn-reject" type="submit" style="padding:0.4rem 0.8rem; border:none; border-radius:6px; cursor:pointer;" onclick="return confirm('Revoke this donation (set to pending)?')">↩ Revoke</button>
+                                                    </form>
+                                                    <button class="btn-secondary" style="padding:0.4rem 0.8rem;" onclick="alert('Viewing details for <?php echo $donation['transaction_id']; ?>')">View</button>
+                                                <?php elseif ($donation['status'] === 'failed'): ?>
+                                                    <form method="POST" style="display:inline; margin-right:6px;">
+                                                        <input type="hidden" name="action" value="verify_donation">
+                                                        <input type="hidden" name="donation_id" value="<?php echo $donation['id']; ?>">
+                                                        <button class="btn-approve" type="submit" style="padding:0.4rem 0.8rem; border:none; border-radius:6px; cursor:pointer;" onclick="return confirm('Mark this donation as verified and completed?')">✓ Verify</button>
+                                                    </form>
+                                                    <button class="btn-secondary" style="padding:0.4rem 0.8rem;" onclick="alert('Viewing details for <?php echo $donation['transaction_id']; ?>')">View</button>
                                                 <?php endif; ?>
                                             </td>
                                         </tr>
@@ -1155,7 +1064,7 @@ if ($page === 'reports') {
                                             </td>
                                             <td><?php echo date('M d, Y', strtotime($item['updated_at'])); ?></td>
                                             <td class="table-actions">
-                                                <button class="btn-secondary" style="padding:0.4rem 0.8rem;" onclick="openEditInventoryModal(<?php echo $item['id']; ?>, '<?php echo addslashes($item['item_name']); ?>', <?php echo $item['quantity']; ?>, '<?php echo addslashes($item['unit']); ?>', '<?php echo addslashes($item['status']); ?>')">Edit</button>
+                                                <button class="btn-secondary" style="padding:0.4rem 0.8rem;" onclick="alert('Adjusting stock for <?php echo $item['item_name']; ?>')">Adjust</button>
                                             </td>
                                         </tr>
                                     <?php endforeach; ?>
@@ -1167,160 +1076,33 @@ if ($page === 'reports') {
                 <?php elseif ($page === 'alerts'): ?>
                     <div class="page-header">
                         <div>
-                            <div class="page-title">Alerts & Announcements</div>
-                            <div class="page-subtitle">Review emergency reports and broadcast urgent announcements</div>
-                        </div>
-                        <button type="button" class="btn-primary" onclick="document.getElementById('sendAnnouncementModal').style.display='grid'">+ Broadcast Announcement</button>
-                    </div>
-                    <div class="panel">
-                        <div class="panel-heading">
-                            <h3>Incoming Emergency Reports</h3>
-                        </div>
-                        <div style="overflow-x: auto;">
-                            <table class="table">
-                                <thead>
-                                    <tr>
-                                        <th>Reported By</th>
-                                        <th>Camp</th>
-                                        <th>Issue Type</th>
-                                        <th>Priority</th>
-                                        <th>Description</th>
-                                        <th>Date</th>
-                                        <th>Status</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php if (empty($alerts_list)): ?>
-                                        <tr><td colspan="8" style="text-align:center; padding:3rem; color:#6b7280;">No active alerts or emergency reports found.</td></tr>
-                                    <?php endif; ?>
-                                    <?php foreach ($alerts_list as $alert): ?>
-                                        <tr>
-                                            <td>
-                                                <div style="display:flex; align-items:center; gap:0.5rem;">
-                                                    <div class="profile-avatar" style="width:28px; height:28px; font-size:0.7rem; background:#fef2f2; color:#ef4444;">
-                                                        <?php echo strtoupper(substr($alert['reporter_name'] ?? 'U', 0, 1)); ?>
-                                                    </div>
-                                                    <span><?php echo htmlspecialchars($alert['reporter_name'] ?? 'Unknown'); ?></span>
-                                                </div>
-                                            </td>
-                                            <td><?php echo htmlspecialchars($alert['camp_name'] ?? 'N/A'); ?></td>
-                                            <td><span class="badge" style="background:#f3f4f6; color:#4b5563;"><?php echo htmlspecialchars($alert['issue_type'] ?? 'General Issue'); ?></span></td>
-                                            <td>
-                                                <?php 
-                                                    $pColor = '#6b7280';
-                                                    if($alert['priority'] === 'critical') $pColor = '#991b1b';
-                                                    else if($alert['priority'] === 'high') $pColor = '#ef4444';
-                                                    else if($alert['priority'] === 'medium') $pColor = '#f59e0b';
-                                                ?>
-                                                <span style="color:<?php echo $pColor; ?>; font-weight:600; font-size:0.85rem;">● <?php echo ucfirst($alert['priority']); ?></span>
-                                            </td>
-                                            <td><div style="max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="<?php echo htmlspecialchars($alert['description']); ?>"><?php echo htmlspecialchars($alert['description']); ?></div></td>
-                                            <td><?php echo date('M d, H:i', strtotime($alert['created_at'])); ?></td>
-                                            <td>
-                                                <span class="badge <?php echo $alert['status'] === 'resolved' ? 'active' : ($alert['status'] === 'in_progress' ? '' : 'inactive'); ?>" style="<?php echo $alert['status'] === 'in_progress' ? 'background:#fffbeb; color:#d97706;' : ''; ?>">
-                                                    <?php echo ucfirst(str_replace('_', ' ', $alert['status'])); ?>
-                                                </span>
-                                            </td>
-                                            <td class="table-actions">
-                                                <?php if ($alert['status'] !== 'resolved'): ?>
-                                                    <form method="POST" style="display:inline;" onsubmit="return confirm('Mark this emergency report as resolved?');">
-                    @csrf
-                                                        <input type="hidden" name="action" value="resolve_alert">
-                                                        <input type="hidden" name="alert_id" value="<?php echo $alert['id']; ?>">
-                                                        <button class="btn-approve" type="submit" style="padding:0.4rem 0.8rem;">Resolve</button>
-                                                    </form>
-                                                <?php else: ?>
-                                                    <span style="font-size:0.85rem; color:#10b981; font-weight:600;">✓ Resolved</span>
-                                                <?php endif; ?>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
+                            <div class="page-title">Alerts</div>
+                            <div class="page-subtitle">Review and respond to camp alerts</div>
                         </div>
                     </div>
+                    <div class="panel"><p>Emergency notifications and incident reports are available for review.</p></div>
                 <?php elseif ($page === 'reports'): ?>
                     <div class="page-header">
                         <div>
-                            <div class="page-title">Aid Distribution Reports</div>
-                            <div class="page-subtitle">Generate operational summaries and analytics in PDF format</div>
+                            <div class="page-title">Reports</div>
+                            <div class="page-subtitle">Generate operational summaries and analytics</div>
                         </div>
-                        <button type="button" class="btn-primary" onclick="generatePDF()">Generate Report (PDF)</button>
+                        <button type="button" class="btn-primary" onclick="alert('Generating report');">Generate Report</button>
                     </div>
-                    <div class="panel" style="overflow-x: auto;">
-                        <div id="reportContainer" style="padding: 20px; background: white; min-width: 800px;">
-                            <div style="text-align: center; margin-bottom: 30px;">
-                                <h2 style="color: #111827; margin-bottom: 5px;">DisasterRelief - Aid Distribution Report</h2>
-                                <p style="color: #6b7280;">Generated on: <?php echo date('F j, Y, g:i a'); ?></p>
-                            </div>
-
-                            <h3 style="margin-bottom: 15px; border-bottom: 2px solid #e5e7eb; padding-bottom: 5px; color: #111827;">Camp Summary</h3>
-                            <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px; border: 1px solid #e5e7eb;">
-                                <thead style="background: #f8fafc;">
-                                    <tr>
-                                        <th style="padding: 12px; border: 1px solid #e5e7eb; text-align: left; color: #374151;">Camp Name</th>
-                                        <th style="padding: 12px; border: 1px solid #e5e7eb; text-align: left; color: #374151;">Total Distributions</th>
-                                        <th style="padding: 12px; border: 1px solid #e5e7eb; text-align: left; color: #374151;">Total Items Distributed</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php if (empty($reports_summary)): ?>
-                                        <tr><td colspan="3" style="padding: 12px; text-align: center; border: 1px solid #e5e7eb; color: #6b7280;">No summary data available.</td></tr>
-                                    <?php endif; ?>
-                                    <?php foreach ($reports_summary as $summary): ?>
-                                        <tr>
-                                            <td style="padding: 12px; border: 1px solid #e5e7eb; color: #111827;"><?php echo htmlspecialchars($summary['camp_name'] ?? 'Unknown Camp'); ?></td>
-                                            <td style="padding: 12px; border: 1px solid #e5e7eb; color: #111827;"><?php echo $summary['total_distributions']; ?></td>
-                                            <td style="padding: 12px; border: 1px solid #e5e7eb; color: #111827;"><?php echo $summary['total_items']; ?></td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-
-                            <h3 style="margin-bottom: 15px; border-bottom: 2px solid #e5e7eb; padding-bottom: 5px; color: #111827;">Detailed Distribution Log</h3>
-                            <table style="width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb;">
-                                <thead style="background: #f8fafc;">
-                                    <tr>
-                                        <th style="padding: 12px; border: 1px solid #e5e7eb; text-align: left; font-size: 0.9rem; color: #374151;">Date</th>
-                                        <th style="padding: 12px; border: 1px solid #e5e7eb; text-align: left; font-size: 0.9rem; color: #374151;">Camp</th>
-                                        <th style="padding: 12px; border: 1px solid #e5e7eb; text-align: left; font-size: 0.9rem; color: #374151;">Recipient</th>
-                                        <th style="padding: 12px; border: 1px solid #e5e7eb; text-align: left; font-size: 0.9rem; color: #374151;">Items Distributed</th>
-                                        <th style="padding: 12px; border: 1px solid #e5e7eb; text-align: left; font-size: 0.9rem; color: #374151;">Qty</th>
-                                        <th style="padding: 12px; border: 1px solid #e5e7eb; text-align: left; font-size: 0.9rem; color: #374151;">Distributed By</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php if (empty($reports_list)): ?>
-                                        <tr><td colspan="6" style="padding: 12px; text-align: center; border: 1px solid #e5e7eb; color: #6b7280;">No distribution logs available.</td></tr>
-                                    <?php endif; ?>
-                                    <?php foreach ($reports_list as $log): ?>
-                                        <tr>
-                                            <td style="padding: 12px; border: 1px solid #e5e7eb; font-size: 0.85rem; color: #111827;"><?php echo date('M d, Y', strtotime($log['distributed_at'])); ?></td>
-                                            <td style="padding: 12px; border: 1px solid #e5e7eb; font-size: 0.85rem; color: #111827;"><?php echo htmlspecialchars($log['camp_name'] ?? 'Unknown'); ?></td>
-                                            <td style="padding: 12px; border: 1px solid #e5e7eb; font-size: 0.85rem; color: #111827;"><?php echo htmlspecialchars($log['recipient_name']); ?></td>
-                                            <td style="padding: 12px; border: 1px solid #e5e7eb; font-size: 0.85rem; color: #111827;"><?php echo htmlspecialchars($log['items']); ?></td>
-                                            <td style="padding: 12px; border: 1px solid #e5e7eb; font-size: 0.85rem; color: #111827;"><?php echo htmlspecialchars($log['quantity']); ?></td>
-                                            <td style="padding: 12px; border: 1px solid #e5e7eb; font-size: 0.85rem; color: #111827;"><?php echo htmlspecialchars($log['volunteer_name'] ?? 'System'); ?></td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
+                    <div class="panel"><p>Reports for camp operations, fundraising, and volunteer engagement appear here.</p></div>
+                <?php elseif ($page === 'settings'): ?>
+                    <div class="page-header">
+                        <div>
+                            <div class="page-title">Settings</div>
+                            <div class="page-subtitle">Configure admin preferences and system behavior</div>
                         </div>
                     </div>
-                    <script>
-                        function generatePDF() {
-                            const element = document.getElementById('reportContainer');
-                            const opt = {
-                                margin:       10,
-                                filename:     'Aid_Distribution_Report.pdf',
-                                image:        { type: 'jpeg', quality: 0.98 },
-                                html2canvas:  { scale: 2 },
-                                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' }
-                            };
-                            html2pdf().set(opt).from(element).save();
-                        }
-                    </script>
+                    <div class="panel" style="max-width:700px;">
+                        <div class="form-field"><label>Notification Preferences</label><select><option>Email & push</option><option>Email only</option><option>Push only</option></select></div>
+                        <div class="form-field"><label>Theme</label><select><option>Light</option><option>Dark</option></select></div>
+                        <div class="form-field"><label>System Status</label><input type="text" value="All systems operational" disabled></div>
+                        <button class="btn-secondary" type="button" onclick="alert('Settings saved');">Save Settings</button>
+                    </div>
                 <?php elseif ($page === 'tasks'): ?>
                     <div class="page-header">
                         <div>
@@ -1414,6 +1196,48 @@ if ($page === 'reports') {
                             </table>
                         </div>
                     </div>
+                <?php elseif ($page === 'donors'): ?>
+                    <div class="page-header">
+                        <div>
+                            <div class="page-title">Donor Accounts Management</div>
+                            <div class="page-subtitle">Approve registrations and manage donor accounts</div>
+                        </div>
+                    </div>
+                    <div class="panel" style="margin-bottom: 1.5rem;">
+                        <div class="page-header" style="padding:0; margin-bottom:1rem; gap:0.75rem;">
+                            <div style="display:flex; align-items:center; gap:0.75rem;"><span class="badge active">Donor List</span><span style="color:#6b7280;"><?php echo count($donors); ?></span></div>
+                        </div>
+                        <table class="table">
+                            <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Status</th><th>Actions</th></tr></thead>
+                            <tbody>
+                                <?php foreach ($donors as $donor): ?>
+                                    <tr>
+                                        <td><?php echo htmlspecialchars($donor['full_name']); ?></td>
+                                        <td><?php echo htmlspecialchars($donor['email']); ?></td>
+                                        <td><?php echo htmlspecialchars($donor['phone'] ?? 'N/A'); ?></td>
+                                        <td><span class="badge <?php echo $donor['status'] === 'active' ? 'active' : 'inactive'; ?>"><?php echo ucfirst($donor['status']); ?></span></td>
+                                        <td class="table-actions">
+                                            <?php if ($donor['status'] !== 'active'): ?>
+                                                <form method="POST" style="display:inline;">
+                                                    @csrf
+                                                    <input type="hidden" name="action" value="approve_donor">
+                                                    <input type="hidden" name="donor_id" value="<?php echo $donor['id']; ?>">
+                                                    <button class="btn btn-approve" type="submit">Approve</button>
+                                                </form>
+                                            <?php else: ?>
+                                                <form method="POST" style="display:inline;">
+                                                    @csrf
+                                                    <input type="hidden" name="action" value="reject_donor">
+                                                    <input type="hidden" name="donor_id" value="<?php echo $donor['id']; ?>">
+                                                    <button class="btn btn-reject" type="submit">Deactivate</button>
+                                                </form>
+                                            <?php endif; ?>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
                 <?php elseif ($page === 'chat'): ?>
                     <div class="page-header">
                         <div>
@@ -1447,104 +1271,13 @@ if ($page === 'reports') {
                                                 <?php echo $cu['last_msg'] ? htmlspecialchars(substr($cu['last_msg'], 0, 50)) . '...' : '<i>No messages yet</i>'; ?>
                                                 <?php if($cu['unread_count'] > 0): ?><span style="background: #ef4444; color: white; padding: 2px 6px; border-radius: 999px; font-size: 0.7rem; margin-left: 5px;"><?php echo $cu['unread_count']; ?> new</span><?php endif; ?>
                                             </td>
-                                            <td><a href="{{ url('admin_dashboard') }}?page=chat&user_id=<?php echo $cu['id']; ?>" class="btn-primary" style="text-decoration:none;">Open Chat</a></td>
+                                            <td><a href="/admin_dashboard?page=chat&user_id=<?php echo $cu['id']; ?>" class="btn-primary" style="text-decoration:none;">Open Chat</a></td>
                                         </tr>
                                     <?php endwhile; else: ?>
                                         <tr><td colspan="4" style="text-align:center;">No users available to chat with.</td></tr>
                                     <?php endif; ?>
                                 </tbody>
                             </table>
-                        </div>
-
-                        <!-- ── Affected Person Chat Power Management ─────────── -->
-                        <?php
-                        $ap_list_res = $conn->query("
-                            SELECT ap.id, ap.full_name, ap.registration_status, ap.chat_power, ap.access_key,
-                                   c.camp_name
-                            FROM affected_persons ap
-                            LEFT JOIN camps c ON ap.camp_id = c.id
-                            ORDER BY ap.chat_power DESC, ap.full_name ASC
-                        ");
-                        $ap_list = [];
-                        if ($ap_list_res) {
-                            while ($row = $ap_list_res->fetch_assoc()) $ap_list[] = $row;
-                        }
-                        ?>
-                        <div class="panel" style="margin-top: 1.5rem; border-top: 3px solid #6366f1;">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
-                                <div>
-                                    <h3 style="font-size:1.1rem; font-weight:700; color:#0f172a; margin:0;">Affected Person Chat Access</h3>
-                                    <p style="color:#6b7280; font-size:0.85rem; margin-top:4px;">Grant or revoke the ability for affected persons to chat directly with their camp manager.</p>
-                                </div>
-                                <span style="background:#ede9fe; color:#6d28d9; padding:4px 12px; border-radius:999px; font-size:0.8rem; font-weight:600;">
-                                    <?php echo count(array_filter($ap_list, fn($r) => $r['chat_power'])); ?> Enabled
-                                </span>
-                            </div>
-                            <?php if (!empty($ap_list)): ?>
-                            <div style="overflow-x:auto;">
-                                <table class="table">
-                                    <thead>
-                                        <tr>
-                                            <th>Affected Person</th>
-                                            <th>Access Key</th>
-                                            <th>Assigned Camp</th>
-                                            <th>Status</th>
-                                            <th>Chat Power</th>
-                                            <th>Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                    <?php foreach ($ap_list as $ap): ?>
-                                        <tr>
-                                            <td>
-                                                <div style="display:flex; align-items:center; gap:0.6rem;">
-                                                    <div class="profile-avatar" style="width:30px; height:30px; font-size:0.7rem; background:<?php echo $ap['chat_power'] ? '#6366f1' : '#94a3b8'; ?>;">
-                                                        <?php echo strtoupper(substr($ap['full_name'], 0, 1)); ?>
-                                                     </div>
-                                                     <strong><?php echo htmlspecialchars($ap['full_name']); ?></strong>
-                                                 </div>
-                                            </td>
-                                            <td><code style="background: #ede9fe; padding: 2px 6px; border-radius: 4px; font-weight: 600; color: #6d28d9;"><?php echo htmlspecialchars($ap['access_key']); ?></code></td>
-                                            <td><?php echo htmlspecialchars($ap['camp_name'] ?? '—'); ?></td>
-                                            <td>
-                                                <?php
-                                                $s = $ap['registration_status'];
-                                                $sc = $s === 'assigned' ? '#059669' : ($s === 'pending' ? '#d97706' : '#6b7280');
-                                                ?>
-                                                <span style="color:<?php echo $sc; ?>; font-size:0.85rem; font-weight:600; text-transform:capitalize;"><?php echo $s; ?></span>
-                                            </td>
-                                            <td>
-                                                <?php if ($ap['chat_power']): ?>
-                                                    <span style="display:inline-flex; align-items:center; gap:5px; background:#ede9fe; color:#6d28d9; padding:4px 10px; border-radius:999px; font-size:0.8rem; font-weight:700;">
-                                                        ✅ Enabled
-                                                    </span>
-                                                <?php else: ?>
-                                                    <span style="display:inline-flex; align-items:center; gap:5px; background:#f1f5f9; color:#94a3b8; padding:4px 10px; border-radius:999px; font-size:0.8rem; font-weight:600;">
-                                                        🔒 Disabled
-                                                    </span>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td>
-                                                <form method="POST" style="display:inline;">
-                    @csrf
-                                                    <input type="hidden" name="affected_id" value="<?php echo $ap['id']; ?>">
-                                                    <?php if ($ap['chat_power']): ?>
-                                                        <input type="hidden" name="action" value="revoke_chat_power">
-                                                        <button type="submit" class="btn-danger" style="font-size:0.8rem; padding:6px 14px; border-radius:8px;" onclick="return confirm('Revoke chat power from <?php echo addslashes($ap['full_name']); ?>?')">Revoke</button>
-                                                    <?php else: ?>
-                                                        <input type="hidden" name="action" value="grant_chat_power">
-                                                        <button type="submit" class="btn-primary" style="font-size:0.8rem; padding:6px 14px; border-radius:8px; background:#6366f1; border-color:#6366f1;">Grant Chat</button>
-                                                    <?php endif; ?>
-                                                </form>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                            <?php else: ?>
-                                <p style="color:#6b7280; text-align:center; padding:2rem;">No affected persons registered in the system yet.</p>
-                            <?php endif; ?>
                         </div>
                     <?php else: 
                         $target_user = $conn->query("SELECT * FROM users WHERE id = $chat_user_id")->fetch_assoc();
@@ -1553,7 +1286,7 @@ if ($page === 'reports') {
                         <div class="panel" style="max-width: 800px;">
                             <div class="panel-heading" style="display:flex; justify-content:space-between; align-items:center;">
                                 <h3>Chat with <?php echo htmlspecialchars($target_user['full_name'] ?? 'User'); ?> <span class="badge active" style="font-size:0.7rem;"><?php echo ucfirst($target_user['role'] ?? ''); ?></span></h3>
-                                <a href="{{ url('admin_dashboard') }}?page=chat" class="btn-secondary" style="text-decoration:none;">Back to List</a>
+                                <a href="/admin_dashboard?page=chat" class="btn-secondary" style="text-decoration:none;">Back to List</a>
                             </div>
                             <div style="height: 350px; background: #f8fafc; border-radius: 18px; padding: 1.5rem; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem;" id="chatContainer">
                                 <?php 
@@ -1575,7 +1308,7 @@ if ($page === 'reports') {
                                 <?php endif; ?>
                             </div>
                             <form method="POST">
-                    @csrf
+                                @csrf
                                 <input type="hidden" name="action" value="send_chat_message">
                                 <input type="hidden" name="receiver_id" value="<?php echo $chat_user_id; ?>">
                                 <div style="display: flex; gap: 1rem;">
@@ -1594,8 +1327,9 @@ if ($page === 'reports') {
         </main>
     </div>
     <div class="dropdown-menu" id="adminProfileMenu" style="position:fixed; top:70px; right:40px; display:none; background:white; border:1px solid #e5e7eb; border-radius:18px; box-shadow:0 18px 60px rgba(15,23,42,0.12); width:220px; z-index:50;">
-        <a href="{{ url('admin_dashboard') }}?page=profile" style="display:block; padding:0.9rem 1rem; color:#111827; text-decoration:none;">Profile</a>
-        <a href="{{ url('logout') }}" style="display:block; padding:0.9rem 1rem; color:#dc2626; text-decoration:none;">Logout</a>
+        <a href="/admin_dashboard?page=profile" style="display:block; padding:0.9rem 1rem; color:#111827; text-decoration:none;">Profile</a>
+        <a href="/admin_dashboard?page=settings" style="display:block; padding:0.9rem 1rem; color:#111827; text-decoration:none;">Settings</a>
+        <a href="/logout" style="display:block; padding:0.9rem 1rem; color:#dc2626; text-decoration:none;">Logout</a>
     </div>
     <script>
         function toggleProfileMenu() {
@@ -2001,93 +1735,6 @@ if ($page === 'reports') {
                 <div style="display:flex; gap:1rem; margin-top:1.5rem;">
                     <button type="button" class="btn-secondary" style="flex:1;" onclick="closeEditTaskModal()">Cancel</button>
                     <button type="submit" class="btn-primary" style="flex:1;">Save Changes</button>
-                </div>
-            </form>
-        </div>
-    </div>
-    <div id="editInventoryModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:100; place-items:center; padding:2rem;">
-        <div class="panel" style="width:100%; max-width:500px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">
-            <div class="panel-heading">
-                <h3>Edit Inventory Item</h3>
-                <button type="button" onclick="closeEditInventoryModal()" style="background:none; border:none; font-size:1.5rem; cursor:pointer;">&times;</button>
-            </div>
-            <form method="POST">
-                    @csrf
-                <input type="hidden" name="action" value="edit_inventory">
-                <input type="hidden" name="inventory_id" id="edit_inv_id">
-                <div class="form-field">
-                    <label>Item Name</label>
-                    <input type="text" id="edit_inv_name" disabled style="background:#f3f4f6; color:#6b7280; cursor:not-allowed;">
-                </div>
-                <div class="form-field" style="display:flex; gap:1rem;">
-                    <div style="flex:1;">
-                        <label>Quantity</label>
-                        <input type="number" step="0.01" name="quantity" id="edit_inv_qty" required>
-                    </div>
-                    <div style="flex:1;">
-                        <label>Unit</label>
-                        <input type="text" id="edit_inv_unit" disabled style="background:#f3f4f6; color:#6b7280; cursor:not-allowed;">
-                    </div>
-                </div>
-                <div class="form-field">
-                    <label>Status</label>
-                    <select name="status" id="edit_inv_status" required>
-                        <option value="In Stock">In Stock</option>
-                        <option value="Limited">Limited</option>
-                        <option value="Out of Stock">Out of Stock</option>
-                    </select>
-                </div>
-                <div style="display:flex; gap:1rem; margin-top:1.5rem;">
-                    <button type="button" class="btn-secondary" style="flex:1;" onclick="closeEditInventoryModal()">Cancel</button>
-                    <button type="submit" class="btn-primary" style="flex:1;">Save Changes</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <script>
-        function openEditInventoryModal(id, name, qty, unit, status) {
-            document.getElementById('edit_inv_id').value = id;
-            document.getElementById('edit_inv_name').value = name;
-            document.getElementById('edit_inv_qty').value = qty;
-            document.getElementById('edit_inv_unit').value = unit;
-            document.getElementById('edit_inv_status').value = status;
-            document.getElementById('editInventoryModal').style.display = 'grid';
-        }
-        function closeEditInventoryModal() {
-            document.getElementById('editInventoryModal').style.display = 'none';
-        }
-    </script>
-
-    <div id="sendAnnouncementModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:100; place-items:center; padding:2rem;">
-        <div class="panel" style="width:100%; max-width:500px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">
-            <div class="panel-heading">
-                <h3>Broadcast Announcement</h3>
-                <button type="button" onclick="document.getElementById('sendAnnouncementModal').style.display='none'" style="background:none; border:none; font-size:1.5rem; cursor:pointer;">&times;</button>
-            </div>
-            <form method="POST">
-                    @csrf
-                <input type="hidden" name="action" value="send_announcement">
-                <div class="form-field">
-                    <label>Target Audience</label>
-                    <select name="target" required>
-                        <option value="all">All Users (Global Broadcast)</option>
-                        <option value="volunteers">Volunteers Only</option>
-                        <option value="managers">Camp Managers Only</option>
-                        <option value="donors">Donors Only</option>
-                    </select>
-                </div>
-                <div class="form-field">
-                    <label>Alert Title</label>
-                    <input type="text" name="title" placeholder="e.g. URGENT: Flood warning in District 4" required>
-                </div>
-                <div class="form-field">
-                    <label>Message</label>
-                    <textarea name="message" placeholder="Provide detailed instructions or announcement text..." required></textarea>
-                </div>
-                <div style="display:flex; gap:1rem; margin-top:1.5rem;">
-                    <button type="button" class="btn-secondary" style="flex:1;" onclick="document.getElementById('sendAnnouncementModal').style.display='none'">Cancel</button>
-                    <button type="submit" class="btn-primary" style="flex:1; background:#ef4444;">Send Alert</button>
                 </div>
             </form>
         </div>

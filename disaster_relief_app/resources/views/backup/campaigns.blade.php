@@ -1,6 +1,6 @@
 <?php
 // Include database configuration and establish connection
-require_once 'config.php';
+require_once '/config';
 
 // Check if user is logged in
 $is_logged_in = isLoggedIn();
@@ -431,37 +431,37 @@ function formatEndDate($end_date) {
 <body>
 
     <header>
-        <a href="{{ url('/') }}" class="logo">
+        <a href="/index" class="logo">
             <i class="fa-solid fa-shield-halved"></i> Relief System
         </a>
         <nav>
-            <a href="{{ url('/') }}">Home</a>
+            <a href="/index">Home</a>
             <?php if ($is_logged_in): ?>
                 <?php if ($user_role === 'admin'): ?>
-                    <a href="{{ url('admin_dashboard') }}">Dashboard</a>
+                    <a href="/admin_dashboard">Dashboard</a>
                 <?php elseif ($user_role === 'camp_manager'): ?>
-                    <a href="{{ url('camp_manager_dashboard') }}">Dashboard</a>
+                    <a href="/camp_manager_dashboard">Dashboard</a>
                 <?php elseif ($user_role === 'volunteer'): ?>
-                    <a href="{{ url('volunteer_dashboard') }}">Dashboard</a>
+                    <a href="/volunteer_dashboard">Dashboard</a>
                 <?php elseif ($user_role === 'donor'): ?>
-                    <a href="{{ url('donor_dashboard') }}">Dashboard</a>
+                    <a href="/donor_dashboard">Dashboard</a>
                 <?php endif; ?>
             <?php endif; ?>
-            <a href="{{ url('/') }}#about">About</a>
-            <a href="{{ url('campaigns') }}" class="active">Campaigns</a>
-            <a href="{{ url('/') }}#donate">Donate</a>
-            <a href="{{ url('/') }}#emergency">Emergency</a>
-            <a href="{{ url('/') }}#contact">Contact</a>
+            <a href="/index#about">About</a>
+            <a href="/campaigns" class="active">Campaigns</a>
+            <a href="/index#donate">Donate</a>
+            <a href="/index#emergency">Emergency</a>
+            <a href="/index#contact">Contact</a>
         </nav>
         <?php if ($is_logged_in): ?>
             <div style="display: flex; align-items: center; gap: 1rem;">
                 <span style="color: var(--text-dark); font-size: 0.9rem; font-weight: 500;">Welcome, <?php echo htmlspecialchars(explode(' ', $user_name)[0]); ?></span>
-                <a href="{{ url('logout') }}" class="btn-login">Logout</a>
+                <a href="/logout" class="btn-login">Logout</a>
             </div>
         <?php else: ?>
             <div style="display: flex; gap: 0.5rem;">
-                <a href="{{ url('signin') }}" class="btn-login">Login</a>
-                <a href="{{ url('signup') }}" style="background-color: var(--primary-blue); color: white; padding: 0.5rem 1.2rem; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 600;">Register</a>
+                <a href="/signin" class="btn-login">Login</a>
+                <a href="/signup" style="background-color: var(--primary-blue); color: white; padding: 0.5rem 1.2rem; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 600;">Register</a>
             </div>
         <?php endif; ?>
     </header>

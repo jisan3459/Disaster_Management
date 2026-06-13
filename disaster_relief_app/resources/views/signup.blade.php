@@ -31,23 +31,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $hashed_password = password_hash($password, PASSWORD_BCRYPT);
             
             // Insert user
+            $status = ($role === 'donor') ? 'inactive' : 'active';
             $insert_query = "INSERT INTO users (role, full_name, email, phone, password, status) 
-                           VALUES ('$role', '$fullname', '$email', '$phone', '$hashed_password', 'active')";
+                           VALUES ('$role', '$fullname', '$email', '$phone', '$hashed_password', '$status')";
             
             if ($conn->query($insert_query)) {
-                $user_id = $conn->insert_id;
-                $_SESSION['user_id'] = $user_id;
-                $_SESSION['role'] = $role;
-                $_SESSION['full_name'] = $fullname;
-                
-                $success = 'Account created successfully!';
-                // Redirect to the correct dashboard based on role
-                if ($role === 'donor') {
-                    php_redirect('/donor_dashboard');
-                } elseif ($role === 'camp_manager') {
-                    php_redirect('/camp_manager_dashboard');
+                if ($status === 'inactive') {
+                    $success = 'Account created successfully! Your account is pending admin approval.';
                 } else {
-                    php_redirect('/volunteer_dashboard');
+                    $user_id = $conn->insert_id;
+                    $_SESSION['user_id'] = $user_id;
+                    $_SESSION['role'] = $role;
+                    $_SESSION['full_name'] = $fullname;
+                    
+                    $success = 'Account created successfully!';
+                    // Redirect to the correct dashboard based on role
+                    if ($role === 'camp_manager') {
+                        php_redirect(url('camp_manager_dashboard'));
+                    } else {
+                        php_redirect(url('volunteer_dashboard'));
+                    }
                 }
             } else {
                 $error = 'Error creating account. Please try again.';
@@ -314,6 +317,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             text-decoration: underline;
         }
 
+        .btn-back-home {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 14px;
+            border: 1.5px solid #f5c4aa;
+            border-radius: 8px;
+            color: #ff6b35;
+            font-size: 0.82rem;
+            font-weight: 600;
+            text-decoration: none;
+            background: #fff5f0;
+            transition: background 0.2s, border-color 0.2s, color 0.2s;
+            white-space: nowrap;
+        }
+
+        .btn-back-home:hover {
+            background: #ff6b35;
+            color: white;
+            border-color: #ff6b35;
+        }
+
         .error-message {
             background-color: #f8d7da;
             color: #721c24;
@@ -395,9 +420,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="form-section">
             <div class="form-container">
                 <!-- Header -->
-                <div class="form-header">
-                    <div class="logo-icon">🛡️</div>
-                    <h2>DisasterRelief</h2>
+                <div class="form-header" style="justify-content: space-between;">
+                    <div style="display:flex; align-items:center; gap:0.8rem;">
+                        <div class="logo-icon">🛡️</div>
+                        <h2>DisasterRelief</h2>
+                    </div>
+                    <a href="{{ url('/') }}" class="btn-back-home">
+                        ← Home
+                    </a>
                 </div>
 
                 <!-- Form Title -->
@@ -414,7 +444,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <?php endif; ?>
 
                 <!-- Form -->
-                <form method="POST" action="/signup">
+                <form method="POST">
                     @csrf
                     <!-- Role Selection -->
                     <div class="form-group">
@@ -423,8 +453,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <option value="">Select your role</option>
                             <option value="volunteer">Volunteer</option>
                             <option value="donor">Donor</option>
-                            <option value="organization">Organization</option>
-                            <option value="other">Other</option>
                         </select>
                     </div>
 
@@ -463,7 +491,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     <!-- Sign In Link -->
                     <div class="signin-link">
-                        Already have an Account? <a href="/signin">Sign in</a>
+                        Already have an Account? <a href="{{ url('signin') }}">Sign in</a>
                     </div>
                 </form>
             </div>

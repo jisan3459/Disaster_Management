@@ -3,17 +3,17 @@ session_start();
 include base_path('../config.php');
 
 if (!isset($_SESSION['user_id'])) {
-    php_redirect(url('signin'));
+    php_redirect('/signin');
 }
 
 $user_id = $_SESSION['user_id'];
 $user_role = $_SESSION['role'];
 
 if ($user_role === 'admin') {
-    php_redirect(url('admin_dashboard'));
+    php_redirect('/admin_dashboard');
 }
 if ($user_role !== 'donor') {
-    php_redirect(url('/'));
+    php_redirect('/index');
 }
 
 $user_query = $conn->query("SELECT * FROM users WHERE id = $user_id");
@@ -33,8 +33,7 @@ if ($all_notifications_query) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'mark_notifications_read') {
     $conn->query("UPDATE notifications SET is_read = 1 WHERE user_id = $user_id");
-    php_redirect(url('donor_dashboard') . "?page=" . ($_GET['page'] ?? 'dashboard'));
-    exit();
+    php_redirect("/donor_dashboard?page=" . ($_GET['page'] ?? 'dashboard'));
 }
 
 $page = isset($_GET['page']) ? $_GET['page'] : 'dashboard';
@@ -88,8 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $page === 'chat') {
         $admin_q = $conn->query("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
         $admin_id = ($admin_q && $admin_q->num_rows > 0) ? $admin_q->fetch_assoc()['id'] : 1;
         $conn->query("INSERT INTO messages (sender_id, receiver_id, message_text) VALUES ($user_id, $admin_id, '$msg')");
-        php_redirect(url('donor_dashboard') . "?page=chat");
-        exit();
+        php_redirect("/donor_dashboard?page=chat");
     }
 }
 
@@ -225,13 +223,12 @@ function formatCurrency($amount) {
                 <div class="brand">Disaster Relief</div>
             </div>
             <ul class="menu">
-                <li class="menu-item"><a href="{{ url('donor_dashboard') }}?page=dashboard" class="menu-link <?php echo $page === 'dashboard' ? 'active' : ''; ?>"><span class="menu-icon">📊</span>Dashboard</a></li>
-                <li class="menu-item"><a href="{{ url('donor_dashboard') }}?page=donate" class="menu-link <?php echo $page === 'donate' ? 'active' : ''; ?>"><span class="menu-icon">💰</span>Donate Now</a></li>
-                <li class="menu-item"><a href="{{ url('donor_dashboard') }}?page=history" class="menu-link <?php echo $page === 'history' ? 'active' : ''; ?>"><span class="menu-icon">📜</span>History</a></li>
-                <li class="menu-item"><a href="{{ url('donor_dashboard') }}?page=track" class="menu-link <?php echo $page === 'track' ? 'active' : ''; ?>"><span class="menu-icon">🌍</span>Impact Tracking</a></li>
-                <li class="menu-item"><a href="{{ url('donor_dashboard') }}?page=campaigns" class="menu-link <?php echo $page === 'campaigns' ? 'active' : ''; ?>"><span class="menu-icon">📣</span>Campaigns</a></li>
-                <li class="menu-item"><a href="{{ url('donor_dashboard') }}?page=chat" class="menu-link <?php echo $page === 'chat' ? 'active' : ''; ?>"><span class="menu-icon">💬</span>Support Chat<?php if($unread_chat > 0): ?><span class="menu-badge" style="background: #ef4444;"><?php echo $unread_chat; ?></span><?php endif; ?></a></li>
-                <li class="menu-item"><a href="{{ url('donor_dashboard') }}?page=settings" class="menu-link <?php echo $page === 'settings' ? 'active' : ''; ?>"><span class="menu-icon">⚙️</span>Settings</a></li>
+                <li class="menu-item"><a href="/donor_dashboard?page=dashboard" class="menu-link <?php echo $page === 'dashboard' ? 'active' : ''; ?>"><span class="menu-icon">📊</span>Dashboard</a></li>
+                <li class="menu-item"><a href="/donor_dashboard?page=donate" class="menu-link <?php echo $page === 'donate' ? 'active' : ''; ?>"><span class="menu-icon">💰</span>Donate Now</a></li>
+                <li class="menu-item"><a href="/donor_dashboard?page=history" class="menu-link <?php echo $page === 'history' ? 'active' : ''; ?>"><span class="menu-icon">📜</span>History</a></li>
+                <li class="menu-item"><a href="/donor_dashboard?page=campaigns" class="menu-link <?php echo $page === 'campaigns' ? 'active' : ''; ?>"><span class="menu-icon">📣</span>Campaigns</a></li>
+                <li class="menu-item"><a href="/donor_dashboard?page=chat" class="menu-link <?php echo $page === 'chat' ? 'active' : ''; ?>"><span class="menu-icon">💬</span>Support Chat</a></li>
+                <li class="menu-item"><a href="/donor_dashboard?page=settings" class="menu-link <?php echo $page === 'settings' ? 'active' : ''; ?>"><span class="menu-icon">⚙️</span>Settings</a></li>
             </ul>
             <div class="sidebar-footer">Donor portal for supporting relief missions worldwide.</div>
         </aside>
@@ -242,36 +239,9 @@ function formatCurrency($amount) {
                     <div class="topbar-subtitle">Every contribution makes a real difference</div>
                 </div>
                 <div class="topbar-actions">
-                    <div class="notification" style="position: relative;" onclick="document.getElementById('notifDropdown').classList.toggle('show')">
-                        🔔 <?php if ($unread_count > 0): ?>
-                            <span class="notification-badge"><?php echo $unread_count; ?></span>
-                        <?php endif; ?>
-                        <div id="notifDropdown" class="profile-dropdown" style="width: 320px; right: -50px; padding: 0;">
-                            <div class="dropdown-header">
-                                <p style="font-weight: 700; font-size: 0.95rem;">Notifications</p>
-                            </div>
-                            <?php if (empty($all_notifications)): ?>
-                                <div style="padding: 1.5rem; text-align: center; color: #6b7280; font-size: 0.9rem;">No new notifications</div>
-                            <?php else: ?>
-                                <div style="max-height: 300px; overflow-y: auto;">
-                                    <?php foreach ($all_notifications as $notif): ?>
-                                        <div style="padding: 1rem; border-bottom: 1px solid #f3f4f6; background: <?php echo $notif['is_read'] ? '#ffffff' : '#eff6ff'; ?>;">
-                                            <div style="font-weight: 700; font-size: 0.85rem; color: #111827;"><?php echo htmlspecialchars($notif['title']); ?></div>
-                                            <div style="font-size: 0.8rem; color: #4b5563; margin-top: 0.25rem;"><?php echo htmlspecialchars($notif['message']); ?></div>
-                                            <div style="font-size: 0.7rem; color: #9ca3af; margin-top: 0.5rem;"><?php echo date('M d, H:i', strtotime($notif['created_at'])); ?></div>
-                                        </div>
-                                    <?php endforeach; ?>
-                                </div>
-                                <div style="padding: 0.75rem; text-align: center; border-top: 1px solid #e5e7eb; background: #f9fafb;">
-                                    <form method="POST" style="margin: 0;">
-                    @csrf
-                                        <input type="hidden" name="action" value="mark_notifications_read">
-                                        <button type="submit" style="background: none; border: none; color: #2563eb; font-size: 0.85rem; font-weight: 700; cursor: pointer;">Mark all as read</button>
-                                    </form>
-                                </div>
-                            <?php endif; ?>
-                        </div>
-                    </div>
+                    <div class="notification">🔔 <?php if ($unread_count > 0): ?>
+                        <span class="notification-badge"><?php echo $unread_count; ?></span>
+                    <?php endif; ?></div>
                     <div style="position: relative;">
                         <button class="profile-button" onclick="toggleProfileMenu()">
                             <div class="profile-avatar"><?php echo strtoupper(substr(trim($user['full_name']), 0, 1)); ?></div>
@@ -285,10 +255,10 @@ function formatCurrency($amount) {
                                 <p style="font-weight: 700; font-size: 0.9rem;"><?php echo htmlspecialchars($user['full_name']); ?></p>
                                 <p style="font-size: 0.75rem; color: #6b7280;"><?php echo htmlspecialchars($user['email']); ?></p>
                             </div>
-                            <a href="{{ url('donor_dashboard') }}?page=profile" class="dropdown-item">👤 My Profile</a>
-                            <a href="{{ url('donor_dashboard') }}?page=settings" class="dropdown-item">⚙️ Settings</a>
+                            <a href="/donor_dashboard?page=profile" class="dropdown-item">👤 My Profile</a>
+                            <a href="/donor_dashboard?page=settings" class="dropdown-item">⚙️ Settings</a>
                             <div style="border-top: 1px solid #f3f4f6;"></div>
-                            <a href="{{ url('logout') }}" class="dropdown-item logout">🚪 Log Out</a>
+                            <a href="/logout" class="dropdown-item logout">🚪 Log Out</a>
                         </div>
                     </div>
                 </div>
@@ -339,7 +309,7 @@ function formatCurrency($amount) {
                                 <h3>Active Campaigns</h3>
                                 <small>Urgent missions that need your support</small>
                             </div>
-                            <a href="{{ url('donor_dashboard') }}?page=campaigns" class="btn-secondary">View All</a>
+                            <a href="/donor_dashboard?page=campaigns" class="btn-secondary">View All</a>
                         </div>
                         <div class="dashboard-grid">
                             <?php $campaigns_limit = $conn->query("SELECT * FROM campaigns WHERE status = 'active' LIMIT 2"); while ($campaign = $campaigns_limit->fetch_assoc()): $progress = $campaign['goal_amount'] > 0 ? round(($campaign['raised_amount'] / $campaign['goal_amount']) * 100) : 0; ?>
@@ -348,7 +318,7 @@ function formatCurrency($amount) {
                                     <p style="color: #6b7280; font-size: 0.9rem; margin-bottom: 1rem;"><?php echo htmlspecialchars($campaign['location']); ?></p>
                                     <div style="height: 8px; background: #e5e7eb; border-radius: 999px; margin-bottom: 0.5rem;"><div style="height: 100%; background: #2563eb; border-radius: 999px; width: <?php echo min(100, $progress); ?>%;"></div></div>
                                     <div style="display:flex; justify-content:space-between; font-size: 0.85rem; color: #4b5563; margin-bottom: 1.25rem;"><span><?php echo $progress; ?>% Funded</span><span>Goal: <?php echo formatCurrency($campaign['goal_amount']); ?></span></div>
-                                    <a href="{{ url('donor_dashboard') }}?page=donate&campaign_id=<?php echo $campaign['id']; ?>" class="btn-primary" style="display: flex; width: 100%;">Donate Now</a>
+                                    <a href="/donor_dashboard?page=donate&campaign_id=<?php echo $campaign['id']; ?>" class="btn-primary" style="display: flex; width: 100%;">Donate Now</a>
                                 </div>
                             <?php endwhile; ?>
                         </div>
@@ -364,13 +334,7 @@ function formatCurrency($amount) {
                                 <?php $recent = $conn->query("SELECT d.*, c.campaign_name FROM donations d LEFT JOIN campaigns c ON d.campaign_id = c.id WHERE d.donor_id = $user_id ORDER BY d.created_at DESC LIMIT 5"); if ($recent->num_rows > 0): while ($donation = $recent->fetch_assoc()): ?>
                                     <tr>
                                         <td><?php echo date('M d, Y', strtotime($donation['created_at'])); ?></td>
-                                        <td>
-                                            <?php if ($donation['donation_type'] === 'money'): ?>
-                                                <strong><?php echo formatCurrency($donation['amount']); ?></strong>
-                                            <?php else: ?>
-                                                <strong><?php echo htmlspecialchars($donation['items_description'] ?? 'Supplies'); ?></strong>
-                                            <?php endif; ?>
-                                        </td>
+                                        <td><strong><?php echo formatCurrency($donation['amount']); ?></strong></td>
                                         <td><?php echo htmlspecialchars($donation['campaign_name'] ?: 'General Fund'); ?></td>
                                         <td><span class="status-pill status-<?php echo $donation['status']; ?>"><?php echo ucfirst($donation['status']); ?></span></td>
                                     </tr>
@@ -388,44 +352,17 @@ function formatCurrency($amount) {
                     @csrf
                             <div class="dashboard-grid" style="grid-template-columns: 1fr 1fr; gap: 1.5rem;">
                                 <div>
-                                    <div class="form-field"><label>Donation Type</label><select name="donation_type" id="donationTypeSelect" onchange="toggleDonationFields()"><option value="money">Monetary (Money)</option><option value="supplies">Supplies / Food / Accessories</option></select></div>
+                                    <div class="form-field"><label>Donation Type</label><select name="donation_type"><option value="money">Monetary</option><option value="supplies">Supplies</option></select></div>
                                     <div class="form-field"><label>Campaign</label><select name="campaign_id" required><option value="">Choose a mission</option><?php $missions = $conn->query("SELECT id, campaign_name FROM campaigns WHERE status = 'active'"); while ($m = $missions->fetch_assoc()): ?><option value="<?php echo $m['id']; ?>" <?php echo $selected_campaign_id === intval($m['id']) ? 'selected' : ''; ?>><?php echo htmlspecialchars($m['campaign_name']); ?></option><?php endwhile; ?></select></div>
                                 </div>
                                 <div>
-                                    <div class="form-field" id="amountField"><label id="amountLabel">Amount (৳)</label><input type="number" name="amount" min="0" required></div>
-                                    <div class="form-field" id="itemsField" style="display:none;"><label>Items Description</label><input type="text" name="items_description" placeholder="e.g. 50 bags of rice, winter clothes"></div>
-                                    <div class="form-field" id="paymentField"><label>Payment Method</label><select name="payment_method"><option value="">Select method</option><option value="Cash">Cash</option><option value="bKash">bKash</option><option value="Nagad">Nagad</option><option value="Bank Transfer">Bank Transfer</option></select></div>
+                                    <div class="form-field"><label>Amount / Quantity</label><input type="number" name="amount" min="1" required></div>
+                                    <div class="form-field"><label>Payment Method</label><select name="payment_method" required><option value="">Select method</option><option>Credit Card</option><option>UPI</option><option>Bank Transfer</option></select></div>
                                 </div>
                             </div>
                             <div class="form-field"><label>Message (Optional)</label><textarea name="message" placeholder="A word of encouragement..."></textarea></div>
                             <button type="submit" class="btn-primary" style="width: 100%; margin-top: 1.5rem; padding: 1.1rem;">Process Donation</button>
                         </form>
-                        <script>
-                            function toggleDonationFields() {
-                                const type = document.getElementById('donationTypeSelect').value;
-                                const amountLabel = document.getElementById('amountLabel');
-                                const itemsField = document.getElementById('itemsField');
-                                const paymentField = document.getElementById('paymentField');
-                                const amountInput = document.querySelector('input[name="amount"]');
-                                const paymentSelect = document.querySelector('select[name="payment_method"]');
-                                
-                                if (type === 'money') {
-                                    amountLabel.innerText = 'Amount (৳)';
-                                    itemsField.style.display = 'none';
-                                    paymentField.style.display = 'block';
-                                    paymentSelect.required = true;
-                                    amountInput.required = true;
-                                } else {
-                                    amountLabel.innerText = 'Estimated Value / Quantity (Optional)';
-                                    itemsField.style.display = 'block';
-                                    paymentField.style.display = 'none';
-                                    paymentSelect.required = false;
-                                    amountInput.required = false;
-                                }
-                            }
-                            // Initialize immediately
-                            document.addEventListener('DOMContentLoaded', toggleDonationFields);
-                        </script>
                     </div>
 
                 <?php elseif ($page === 'history'): ?>
@@ -437,13 +374,7 @@ function formatCurrency($amount) {
                                 <?php while ($donation = $my_donations_query->fetch_assoc()): ?>
                                     <tr>
                                         <td><?php echo date('M d, Y', strtotime($donation['created_at'])); ?></td>
-                                        <td>
-                                            <?php if ($donation['donation_type'] === 'money'): ?>
-                                                <strong><?php echo formatCurrency($donation['amount']); ?></strong>
-                                            <?php else: ?>
-                                                <strong><?php echo htmlspecialchars($donation['items_description'] ?? 'Supplies'); ?></strong>
-                                            <?php endif; ?>
-                                        </td>
+                                        <td><strong><?php echo formatCurrency($donation['amount']); ?></strong></td>
                                         <td><?php echo ucfirst($donation['donation_type']); ?></td>
                                         <td><?php echo htmlspecialchars($donation['campaign_name'] ?: 'General Fund'); ?></td>
                                         <td><code><?php echo $donation['transaction_id']; ?></code></td>
@@ -454,122 +385,19 @@ function formatCurrency($amount) {
                         </table>
                     </div>
 
-                <?php elseif ($page === 'track'): ?>
-                    <div class="panel">
-                        <div class="panel-heading">
-                            <div>
-                                <h3>Impact Tracking</h3>
-                                <small>See exactly where aid is being distributed from the general fund and your supported campaigns.</small>
-                            </div>
-                        </div>
-                        <table class="table">
-                            <thead><tr><th>Distribution Date</th><th>Camp Location</th><th>Recipient</th><th>Items Given</th><th>Quantity</th></tr></thead>
-                            <tbody>
-                                <?php 
-                                $dist_query = $conn->query("SELECT d.*, c.camp_name, c.location FROM distributions d LEFT JOIN camps c ON d.camp_id = c.id ORDER BY d.distributed_at DESC LIMIT 20");
-                                if ($dist_query && $dist_query->num_rows > 0): 
-                                    while ($dist = $dist_query->fetch_assoc()): ?>
-                                    <tr>
-                                        <td><?php echo date('M d, Y', strtotime($dist['distributed_at'])); ?></td>
-                                        <td><strong><?php echo htmlspecialchars($dist['camp_name'] ?? 'Unknown Camp'); ?></strong><br><small style="color:#6b7280;"><?php echo htmlspecialchars($dist['location'] ?? ''); ?></small></td>
-                                        <td><?php echo htmlspecialchars($dist['recipient_name']); ?></td>
-                                        <td><?php echo htmlspecialchars($dist['items']); ?></td>
-                                        <td><span class="status-pill status-completed" style="background:#eff6ff; color:#2563eb; padding: 0.2rem 0.6rem;"><?php echo $dist['quantity']; ?></span></td>
-                                    </tr>
-                                <?php endwhile; else: ?>
-                                    <tr><td colspan="5" style="text-align:center; color:#6b7280;">No distribution records available yet.</td></tr>
-                                <?php endif; ?>
-                            </tbody>
-                        </table>
-                    </div>
-
-                <?php elseif ($page === 'campaigns'): ?>
-                    <div class="panel-heading" style="margin-bottom: 1.5rem;">
-                        <div>
-                            <h3>Active Campaigns</h3>
-                            <small>Browse all ongoing relief missions and contribute to those in need.</small>
-                        </div>
-                    </div>
-                    <div class="dashboard-grid">
-                        <?php 
-                        $all_campaigns = $conn->query("SELECT * FROM campaigns WHERE status = 'active' ORDER BY urgency = 'urgent' DESC, created_at DESC");
-                        if ($all_campaigns && $all_campaigns->num_rows > 0):
-                            while ($campaign = $all_campaigns->fetch_assoc()): 
-                                $progress = $campaign['goal_amount'] > 0 ? round(($campaign['raised_amount'] / $campaign['goal_amount']) * 100) : 0; 
-                                $urgency_color = $campaign['urgency'] === 'urgent' ? '#ef4444' : ($campaign['urgency'] === 'high' ? '#f97316' : '#2563eb');
-                        ?>
-                            <div style="background: white; padding: 1.75rem; border-radius: 24px; border: 1px solid #e5e7eb; box-shadow: 0 4px 15px rgba(0,0,0,0.03); display: flex; flex-direction: column;">
-                                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
-                                    <h4 style="font-size: 1.2rem; color: #111827; margin: 0;"><?php echo htmlspecialchars($campaign['campaign_name']); ?></h4>
-                                    <span style="background: <?php echo $urgency_color; ?>15; color: <?php echo $urgency_color; ?>; padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">
-                                        <?php echo htmlspecialchars($campaign['urgency']); ?>
-                                    </span>
-                                </div>
-                                <p style="color: #6b7280; font-size: 0.9rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
-                                    <span>📍</span> <?php echo htmlspecialchars($campaign['location'] ?: 'Multiple Locations'); ?>
-                                </p>
-                                <p style="color: #4b5563; font-size: 0.95rem; line-height: 1.5; margin-bottom: 1.5rem; flex: 1;">
-                                    <?php echo htmlspecialchars(substr($campaign['description'] ?? 'No description provided.', 0, 150)) . '...'; ?>
-                                </p>
-                                <div style="margin-top: auto;">
-                                    <div style="height: 8px; background: #e5e7eb; border-radius: 999px; margin-bottom: 0.75rem; overflow: hidden;">
-                                        <div style="height: 100%; background: <?php echo $urgency_color; ?>; border-radius: 999px; width: <?php echo min(100, $progress); ?>%; transition: width 1s ease-in-out;"></div>
-                                    </div>
-                                    <div style="display:flex; justify-content:space-between; font-size: 0.9rem; color: #374151; margin-bottom: 1.5rem; font-weight: 600;">
-                                        <span><?php echo formatCurrency($campaign['raised_amount']); ?> raised</span>
-                                        <span style="color: #6b7280;">Goal: <?php echo formatCurrency($campaign['goal_amount']); ?></span>
-                                    </div>
-                                    <a href="{{ url('donor_dashboard') }}?page=donate&campaign_id=<?php echo $campaign['id']; ?>" class="btn-primary" style="display: flex; width: 100%; text-decoration: none; justify-content: center; text-align: center;">Support This Mission</a>
-                                </div>
-                            </div>
-                        <?php endwhile; else: ?>
-                            <div style="grid-column: 1 / -1; text-align: center; padding: 3rem; background: white; border-radius: 24px; border: 1px dashed #cbd5e1;">
-                                <h4 style="color: #475569; margin-bottom: 0.5rem;">No Active Campaigns</h4>
-                                <p style="color: #64748b;">There are currently no active campaigns. Check back later.</p>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-
                 <?php elseif ($page === 'chat'): ?>
                     <div class="panel" style="max-width: 800px;">
                         <div class="panel-heading"><h3>Support & Updates</h3><small>Chat with the relief coordination team</small></div>
-                        <div style="height: 350px; background: #f8fafc; border-radius: 18px; padding: 1.5rem; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem;" id="chatContainer">
-                            <?php 
-                            $admin_query = $conn->query("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
-                            $admin_id = ($admin_query && $admin_query->num_rows > 0) ? $admin_query->fetch_assoc()['id'] : 1;
-                            
-                            $conn->query("UPDATE messages SET is_read = 1 WHERE sender_id = $admin_id AND receiver_id = $user_id AND is_read = 0");
-                            
-                            $messages = $conn->query("SELECT * FROM messages WHERE (sender_id = $user_id AND receiver_id = $admin_id) OR (sender_id = $admin_id AND receiver_id = $user_id) ORDER BY created_at ASC");
-                            if ($messages && $messages->num_rows > 0):
-                                while ($msg = $messages->fetch_assoc()):
-                                    $is_me = ($msg['sender_id'] == $user_id);
-                            ?>
-                                <div style="background: <?php echo $is_me ? '#2563eb' : 'white'; ?>; color: <?php echo $is_me ? 'white' : '#111827'; ?>; padding: 0.8rem 1.2rem; border-radius: 14px; max-width: 80%; <?php echo $is_me ? 'align-self: flex-end; border-bottom-right-radius: 4px;' : 'align-self: flex-start; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border-bottom-left-radius: 4px;'; ?>">
-                                    <div style="font-size: 0.95rem; line-height: 1.4;"><?php echo htmlspecialchars($msg['message_text']); ?></div>
-                                    <div style="font-size: 0.7rem; color: <?php echo $is_me ? '#93c5fd' : '#9ca3af'; ?>; margin-top: 0.4rem; text-align: right;">
-                                        <?php echo date('M d, g:i a', strtotime($msg['created_at'])); ?>
-                                    </div>
-                                </div>
-                            <?php endwhile; else: ?>
-                                <div style="text-align: center; color: #6b7280; font-size: 0.9rem; margin-top: auto; margin-bottom: auto;">
-                                    Start a conversation with our support team. We're here to help!
-                                </div>
-                            <?php endif; ?>
+                        <div style="height: 350px; background: #f8fafc; border-radius: 18px; padding: 1.5rem; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem;">
+                            <div style="background: white; padding: 1rem; border-radius: 14px; max-width: 80%; align-self: flex-start; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">Hello! Thank you for your recent donation. We've allocated it to the Flood Relief campaign.</div>
                         </div>
                         <form method="POST">
                     @csrf
                             <div style="display: flex; gap: 1rem;">
-                                <input type="text" name="message" placeholder="Type a message..." style="flex: 1; border: 1px solid #d1d5db; border-radius: 14px; padding: 0.95rem 1rem;" required autocomplete="off" autofocus>
+                                <input type="text" name="message" placeholder="Ask a question..." style="flex: 1; border: 1px solid #d1d5db; border-radius: 14px; padding: 0.95rem 1rem;" required>
                                 <button type="submit" class="btn-primary">Send</button>
                             </div>
                         </form>
-                        <script>
-                            const chatContainer = document.getElementById('chatContainer');
-                            if (chatContainer) {
-                                chatContainer.scrollTop = chatContainer.scrollHeight;
-                            }
-                        </script>
                     </div>
                 <?php elseif ($page === 'settings'): ?>
                     <div class="panel" style="max-width: 600px;">
@@ -578,15 +406,15 @@ function formatCurrency($amount) {
                         <div class="form-field"><label>Email Address</label><input type="email" value="<?php echo htmlspecialchars($user['email']); ?>" disabled></div>
                         <button class="btn-primary" onclick="alert('Settings saved!')">Save Preferences</button>
                         <hr style="margin: 2rem 0; border: 0; border-top: 1px solid #e5e7eb;">
-                        <a href="{{ url('logout') }}" style="color: #ef4444; text-decoration: none; font-weight: 600;">Log out of portal</a>
+                        <a href="/logout" style="color: #ef4444; text-decoration: none; font-weight: 600;">Log out of portal</a>
                     </div>
                 <?php endif; ?>
             </div>
         </main>
     </div>
     <div class="dropdown-menu" id="userProfileMenu" style="position:fixed; top:70px; right:40px; display:none; background:white; border:1px solid #e5e7eb; border-radius:18px; box-shadow:0 18px 60px rgba(15,23,42,0.12); width:220px; z-index:50;">
-        <a href="{{ url('donor_dashboard') }}?page=settings" style="display:block; padding:0.9rem 1rem; color:#111827; text-decoration:none;">Settings</a>
-        <a href="{{ url('logout') }}" style="display:block; padding:0.9rem 1rem; color:#dc2626; text-decoration:none;">Logout</a>
+        <a href="/donor_dashboard?page=settings" style="display:block; padding:0.9rem 1rem; color:#111827; text-decoration:none;">Settings</a>
+        <a href="/logout" style="display:block; padding:0.9rem 1rem; color:#dc2626; text-decoration:none;">Logout</a>
     </div>
     <script>
         function toggleProfileMenu() {

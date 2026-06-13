@@ -2,9 +2,9 @@
 // config file for main connection
 session_start();
 
-if (file_exists('config.php')) {
+if (file_exists('/config')) {
     try {
-        require_once 'config.php';
+        require_once '/config';
     } catch (Exception $e) {
         // Database connection failed, continue with session only
         error_log("Database connection failed: " . $e->getMessage());
@@ -338,17 +338,17 @@ $volunteers = 15;
             </div>
 
             <div class="nav-links">
-                <a href="{{ url('/') }}">Home</a>
-                <a href="{{ url('admin_dashboard') }}">Dashboard</a>
-                <a href="{{ url('campaigns') }}">Campaigns</a>
-                <a href="{{ url('donate') }}">Donate</a>
-                <a href="{{ url('signin') }}">Emergency</a>
+                <a href="/index">Home</a>
+                <a href="/admin_dashboard">Dashboard</a>
+                <a href="/campaigns">Campaigns</a>
+                <a href="/signin">Donate</a>
+                <a href="/signin">Emergency</a>
             </div>
 
             <?php if(isset($_SESSION['user_id'])): ?>
-                <a href="{{ url('logout') }}" class="login-btn" style="background:#dc2626;">Logout</a>
+                <a href="/logout" class="login-btn" style="background:#dc2626;">Logout</a>
             <?php else: ?>
-                <a href="{{ url('signin') }}" class="login-btn">Login / Register</a>
+                <a href="/signin" class="login-btn">Login / Register</a>
             <?php endif; ?>
         </div>
     </nav>
@@ -363,8 +363,8 @@ $volunteers = 15;
             </p>
 
             <div class="hero-buttons">
-                <a href="{{ url('signin') }}" class="primary-btn">Emergency Help</a>
-                <a href="{{ url('signin') }}" class="secondary-btn">
+                <a href="/signin" class="primary-btn">Emergency Help</a>
+                <a href="/signin" class="secondary-btn">
                     <i class="ri-heart-line"></i>
                     Donate Now
                 </a>

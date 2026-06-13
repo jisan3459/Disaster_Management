@@ -1,6 +1,6 @@
 <?php
 // Include database configuration and establish connection
-require_once '/config';
+require_once 'config.php';
 
 // Check if user is logged in
 $is_logged_in = isLoggedIn();
@@ -39,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Create new donor user
             $password_hash = password_hash('donor_' . time(), PASSWORD_BCRYPT);
             $insert_donor = "INSERT INTO users (role, full_name, email, password, status) 
-                            VALUES ('donor', '$full_name', '$email', '$password_hash', 'active')";
+                            VALUES ('donor', '$full_name', '$email', '$password_hash', 'inactive')";
             
             if (!$conn->query($insert_donor)) {
                 $error_message = 'Error creating donor record: ' . $conn->error;
@@ -57,16 +57,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $campaign_clause = $campaign_id ? $campaign_id : 'NULL';
             
             $insert_donation = "INSERT INTO donations (donor_id, campaign_id, amount, donation_type, status) 
-                               VALUES ($donor_id, $campaign_clause, $amount, '$donation_type', 'completed')";
+                               VALUES ($donor_id, $campaign_clause, $amount, '$donation_type', 'pending')";
             
             if ($conn->query($insert_donation)) {
-                // Update campaign raised amount if campaign_id exists
-                if ($campaign_id) {
-                    $conn->query("UPDATE campaigns SET raised_amount = raised_amount + $amount WHERE id = $campaign_id");
-                }
-                
                 $donation_success = true;
-                $success_message = "Thank you for your donation of \$$amount! Your contribution will make a real difference.";
+                $success_message = "Thank you for your donation of \$$amount! Your contribution is now pending verification and will make a real difference once approved.";
             } else {
                 $error_message = 'Error processing donation: ' . $conn->error;
             }
@@ -537,37 +532,37 @@ while ($row = $urgent_result->fetch_assoc()) {
 <body>
 
     <header>
-        <a href="/index" class="logo">
+        <a href="{{ url('/') }}" class="logo">
             <i class="fa-solid fa-shield-halved"></i> Relief System
         </a>
         <nav>
-            <a href="/index">Home</a>
+            <a href="{{ url('/') }}">Home</a>
             <?php if ($is_logged_in): ?>
                 <?php if ($user_role === 'admin'): ?>
-                    <a href="/admin_dashboard">Dashboard</a>
+                    <a href="{{ url('admin_dashboard') }}">Dashboard</a>
                 <?php elseif ($user_role === 'camp_manager'): ?>
-                    <a href="/camp_manager_dashboard">Dashboard</a>
+                    <a href="{{ url('camp_manager_dashboard') }}">Dashboard</a>
                 <?php elseif ($user_role === 'volunteer'): ?>
-                    <a href="/volunteer_dashboard">Dashboard</a>
+                    <a href="{{ url('volunteer_dashboard') }}">Dashboard</a>
                 <?php elseif ($user_role === 'donor'): ?>
-                    <a href="/donor_dashboard">Dashboard</a>
+                    <a href="{{ url('donor_dashboard') }}">Dashboard</a>
                 <?php endif; ?>
             <?php endif; ?>
-            <a href="/index#about">About</a>
-            <a href="/campaigns">Campaigns</a>
-            <a href="/donate" class="active">Donate</a>
-            <a href="/index#emergency">Emergency</a>
-            <a href="/index#contact">Contact</a>
+            <a href="{{ url('/') }}#about">About</a>
+            <a href="{{ url('campaigns') }}">Campaigns</a>
+            <a href="{{ url('donate') }}" class="active">Donate</a>
+            <a href="{{ url('/') }}#emergency">Emergency</a>
+            <a href="{{ url('/') }}#contact">Contact</a>
         </nav>
         <?php if ($is_logged_in): ?>
             <div style="display: flex; align-items: center; gap: 1rem;">
                 <span style="color: var(--text-dark); font-size: 0.9rem; font-weight: 500;">Welcome, <?php echo htmlspecialchars(explode(' ', $user_name)[0]); ?></span>
-                <a href="/logout" class="btn-login">Logout</a>
+                <a href="{{ url('logout') }}" class="btn-login">Logout</a>
             </div>
         <?php else: ?>
             <div style="display: flex; gap: 0.5rem;">
-                <a href="/signin" class="btn-login">Login</a>
-                <a href="/signup" style="background-color: var(--primary-blue); color: white; padding: 0.5rem 1.2rem; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 600;">Register</a>
+                <a href="{{ url('signin') }}" class="btn-login">Login</a>
+                <a href="{{ url('signup') }}" style="background-color: var(--primary-blue); color: white; padding: 0.5rem 1.2rem; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 600;">Register</a>
             </div>
         <?php endif; ?>
     </header>
@@ -595,7 +590,7 @@ while ($row = $urgent_result->fetch_assoc()) {
         <div class="donation-container">
             <div class="donation-form-flow">
                 
-                <form method="POST" action="/donate">
+                <form method="POST" action="{{ url('donate') }}">
                     @csrf
                 
                 <div class="card-panel">
@@ -755,20 +750,20 @@ while ($row = $urgent_result->fetch_assoc()) {
             <div class="footer-column">
                 <h4>Quick Links</h4>
                 <ul>
-                    <li><a href="/index">Home</a></li>
-                    <li><a href="/admin_dashboard">Live Dashboard</a></li>
-                    <li><a href="/index#about">About Us</a></li>
-                    <li><a href="/campaigns">Campaigns</a></li>
-                    <li><a href="/index#contact">Contact</a></li>
+                    <li><a href="{{ url('/') }}">Home</a></li>
+                    <li><a href="{{ url('admin_dashboard') }}">Live Dashboard</a></li>
+                    <li><a href="{{ url('/') }}#about">About Us</a></li>
+                    <li><a href="{{ url('campaigns') }}">Campaigns</a></li>
+                    <li><a href="{{ url('/') }}#contact">Contact</a></li>
                 </ul>
             </div>
             <div class="footer-column">
                 <h4>Get Involved</h4>
                 <ul>
-                    <li><a href="/donate">Make a Donation</a></li>
-                    <li><a href="/signup">Volunteer</a></li>
-                    <li><a href="/signup">Need Help?</a></li>
-                    <li><a href="/index">Partner With Us</a></li>
+                    <li><a href="{{ url('donate') }}">Make a Donation</a></li>
+                    <li><a href="{{ url('signup') }}">Volunteer</a></li>
+                    <li><a href="{{ url('signup') }}">Need Help?</a></li>
+                    <li><a href="{{ url('/') }}">Partner With Us</a></li>
                 </ul>
             </div>
             <div class="footer-column">
